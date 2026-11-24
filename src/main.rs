@@ -7,6 +7,10 @@ use alphacad::platform;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Проверка драйвера OpenGL в дочернем процессе (см. renderer::gpu::probe).
+    if args.first().map(|a| a == alphacad::renderer::gpu::probe::PROBE_ARG).unwrap_or(false) {
+        std::process::exit(alphacad::renderer::gpu::probe::child_main(args.get(1).map(|s| s.as_str())));
+    }
     let cmd = match cli::parse(&args) {
         Ok(c) => c,
         Err(e) => {

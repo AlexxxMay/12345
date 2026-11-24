@@ -431,8 +431,24 @@ impl State {
                     t("Видеокарта будет задействована при следующей отрисовке.", "The GPU will be used on the next redraw.").to_string()
                 };
                 let col = if self.cfg.gpu && self.gpu_error.is_some() { theme::DANGER() } else { theme::TEXT_DIM() };
-                ui.text_in(Rect::new(x0, y, w0, 18.0 * s), &status, 11.0, col, 0);
-                y += 26.0 * s;
+                // Длинные сообщения (причина отказа драйвера) — в две строки.
+                let mut lines: Vec<String> = vec![String::new()];
+                for word in status.split(' ') {
+                    let n_lines = lines.len();
+                    let cur = lines.last_mut().unwrap();
+                    let cand = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+                    if !cur.is_empty() && ui.text_width(&cand, 11.0) > w0 && n_lines < 2 {
+                        let next = word.to_string();
+                        lines.push(next);
+                    } else {
+                        *cur = cand;
+                    }
+                }
+                for l in &lines {
+                    ui.text_in(Rect::new(x0, y, w0, 18.0 * s), l, 11.0, col, 0);
+                    y += 16.0 * s;
+                }
+                y += 10.0 * s;
                 let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Потоков рендера", "Render threads"), lw);
                 let mut th = self.cfg.threads as f32;
                 let fw2 = fr.w * 0.4;

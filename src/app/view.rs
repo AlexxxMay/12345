@@ -1082,7 +1082,7 @@ impl State {
         let mut gpu_stats = None;
         if self.cfg.gpu {
             if self.gpu.is_none() && self.gpu_error.is_none() {
-                match crate::renderer::gpu::GpuRenderer::new() {
+                match crate::renderer::gpu::probe::check().and_then(|_| crate::renderer::gpu::GpuRenderer::new()) {
                     Ok(g) => self.gpu = Some(g),
                     Err(e) => self.gpu_error = Some(e),
                 }

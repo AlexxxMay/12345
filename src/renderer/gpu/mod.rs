@@ -20,6 +20,8 @@ use super::software::{self, Camera, DisplayMesh, Line3, RenderItem, RenderSettin
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 
+pub mod probe;
+
 #[cfg(any(target_os = "windows", feature = "check-windows"))]
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod wgl;
@@ -181,11 +183,15 @@ pub(crate) trait GlContext {
 
 /// Диагностика инициализации OpenGL в stderr (переменная `ALPHACAD_GL_TRACE=1`).
 pub(crate) fn trace(msg: &str) {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    if *ON.get_or_init(|| std::env::var("ALPHACAD_GL_TRACE").map(|v| v == "1").unwrap_or(false)) {
+    if trace_on() {
         eprintln!("[gl] {msg}");
     }
+}
+
+pub(crate) fn trace_on() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("ALPHACAD_GL_TRACE").map(|v| v == "1").unwrap_or(false))
 }
 
 #[allow(unreachable_code)]
@@ -673,7 +679,7 @@ impl GpuRenderer {
         unsafe {
             self.ensure_fbo(w, h)?;
             self.frame += 1;
-            let tr = self.frame <= 2;
+            let tr = self.frame <= 2 && trace_on();
             if tr {
                 trace(&format!("frame {}: {} items, {} overlay lines", self.frame, items.len(), overlay.len()));
             }
@@ -832,7 +838,7 @@ impl GpuRenderer {
         };
         unsafe {
             let gl = &self.gl;
-            if self.frame <= 2 {
+            if self.frame <= 2 && trace_on() {
                 (gl.Finish)();
                 trace("meshes drawn");
             }
@@ -906,7 +912,7 @@ impl GpuRenderer {
         }
 
         // --- Считывание: цвет, идентификаторы, глубина (с переворотом по вертикали).
-        let tr = self.frame <= 2;
+        let tr = self.frame <= 2 && trace_on();
         unsafe {
             if tr {
                 (self.gl.Finish)();

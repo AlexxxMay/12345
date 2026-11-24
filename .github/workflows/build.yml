@@ -64,11 +64,14 @@ jobs:
           snap() { out=$("$@" 2>&1); rc=$?; echo "$out"; echo "::notice title=GPU test (Windows)::rc=$rc $(echo "$out" | tr '\n' ' ' | cut -c1-900)"; return $rc; }
           snap ./target/release/alphacad.exe snapshot ui-windows-cpu.png --render cpu --script box,ok,cylinder,sphere
           export ALPHACAD_GL_TRACE=1
-          snap ./gputest/alphacad.exe snapshot ui-windows-gpu.png --require-gpu --script box,ok,cylinder,sphere
+          GALLIUM_DRIVER=llvmpipe snap ./gputest/alphacad.exe snapshot ui-windows-gpu.png --require-gpu --script box,ok,cylinder,sphere
           GALLIUM_DRIVER=llvmpipe snap ./gputest/alphacad.exe snapshot ui-windows-gpu-dark.png --require-gpu --theme dark --script box,ok,cylinder,wire
+          # Mesa d3d12 без dxil.dll падает в драйвере — программа должна пережить это (проверка в дочернем процессе).
+          GALLIUM_DRIVER=d3d12 snap ./gputest/alphacad.exe snapshot ui-windows-gpu-crashing-driver.png --render gpu --script box,ok
+          unset ALPHACAD_GL_TRACE
           snap ./target/release/alphacad.exe snapshot ui-windows-gpu-fallback.png --render gpu --script box,ok
           python -m pip install -q pillow
-          python -c "from PIL import Image, ImageChops; a=Image.open('ui-windows-cpu.png').convert('RGB'); b=Image.open('ui-windows-gpu.png').convert('RGB'); d=ImageChops.difference(a,b).convert('L'); h=d.histogram(); n=sum(h); print('::notice title=GPU vs CPU (Windows)::differing pixels >24: %.2f%%' % (100.0*sum(h[25:])/n))" || true
+          python -c "from PIL import Image, ImageChops; a=Image.open('ui-windows-cpu.png').convert('RGB'); b=Image.open('ui-windows-gpu.png').convert('RGB'); d=ImageChops.difference(a,b).convert('L'); h=d.histogram(); n=sum(h); print('::notice title=GPU vs CPU (Windows)::differing pixels (delta>24): %.2f pct' % (100.0*sum(h[25:])/n))" || true
       - name: Inno Setup (6.7+ for dark wizard with background image)
         shell: pwsh
         run: |
@@ -132,6 +135,7 @@ jobs:
           snap ./target/universal/alphacad snapshot ui-macos-cpu.png --render cpu --script box,ok,cylinder,sphere
           snap ./target/universal/alphacad snapshot ui-macos-gpu.png --render gpu --script box,ok,cylinder,sphere
           ALPHACAD_GL_SOFTWARE=1 snap ./target/universal/alphacad snapshot ui-macos-gpu-sw.png --require-gpu --script box,ok,cylinder,sphere
+          ALPHACAD_GL_SOFTWARE=1 snap ./target/universal/alphacad snapshot ui-macos-gpu-sw-dark.png --require-gpu --theme dark --script box,ok,cylinder,wire
       - name: App bundle
         run: |
           VER="${{ steps.ver.outputs.version }}"
