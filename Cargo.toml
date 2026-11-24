@@ -1,0 +1,39 @@
+[package]
+name = "forgecad"
+version = "0.1.0"
+edition = "2021"
+description = "ForgeCAD — лёгкий 3D CAD редактор (просмотр и моделирование STL/STEP/OBJ/PLY) в духе Fusion 360"
+license = "MIT"
+authors = ["ForgeCAD contributors"]
+readme = "README.md"
+keywords = ["cad", "3d", "stl", "step", "modeling", "viewer"]
+categories = ["graphics", "gui"]
+
+[lib]
+name = "forgecad"
+path = "src/lib.rs"
+
+[[bin]]
+name = "forgecad"
+path = "src/main.rs"
+
+# NOTE: проект намеренно не использует внешних зависимостей (только std),
+# чтобы сборка была надёжной на любой машине и бинарь оставался компактным
+# и быстрым даже на слабых компьютерах.
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false
+
+[profile.dev]
+opt-level = 1
+debug = true
+
+[features]
+# Только для `cargo check` платформенного кода на Linux (без линковки).
+check-windows = []
+check-macos = []

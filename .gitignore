@@ -1,0 +1,4 @@
+/target
+/.arena
+*.png.tmp
+.DS_Store
