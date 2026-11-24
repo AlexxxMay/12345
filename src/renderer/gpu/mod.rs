@@ -686,9 +686,16 @@ impl GpuRenderer {
             (gl.CullFace)(GL_BACK);
             let both = [GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1];
             (gl.DrawBuffers)(2, both.as_ptr());
+            if tr {
+                trace(&format!("draw buffers set, err 0x{:X}", (gl.GetError)()));
+            }
             (gl.ClearColor)(0.0, 0.0, 0.0, 0.0);
             (gl.DepthMask)(1);
             (gl.Clear)(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            if tr {
+                (gl.Finish)();
+                trace(&format!("cleared, err 0x{:X}", (gl.GetError)()));
+            }
 
             // Фон — вертикальный градиент.
             (gl.Disable)(GL_DEPTH_TEST);
@@ -712,6 +719,9 @@ impl GpuRenderer {
             (gl.EnableVertexAttribArray)(1);
             (gl.VertexAttribPointer)(0, 2, GL_FLOAT, 0, 24, std::ptr::null());
             (gl.VertexAttribPointer)(1, 4, GL_FLOAT, 0, 24, 8 as *const c_void);
+            if tr {
+                trace(&format!("bg buffer ready, err 0x{:X}", (gl.GetError)()));
+            }
             (gl.DrawArrays)(GL_TRIANGLE_STRIP, 0, 4);
             if tr {
                 (gl.Finish)();
