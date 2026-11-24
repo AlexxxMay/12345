@@ -673,6 +673,10 @@ impl GpuRenderer {
         unsafe {
             self.ensure_fbo(w, h)?;
             self.frame += 1;
+            let tr = self.frame <= 2;
+            if tr {
+                trace(&format!("frame {}: {} items, {} overlay lines", self.frame, items.len(), overlay.len()));
+            }
             let gl = &self.gl;
             (gl.BindFramebuffer)(GL_FRAMEBUFFER, self.fbo);
             (gl.Viewport)(0, 0, w as GLsizei, h as GLsizei);
@@ -709,6 +713,10 @@ impl GpuRenderer {
             (gl.VertexAttribPointer)(0, 2, GL_FLOAT, 0, 24, std::ptr::null());
             (gl.VertexAttribPointer)(1, 4, GL_FLOAT, 0, 24, 8 as *const c_void);
             (gl.DrawArrays)(GL_TRIANGLE_STRIP, 0, 4);
+            if tr {
+                (gl.Finish)();
+                trace("background drawn");
+            }
         }
 
         let aspect = w as f32 / h as f32;
@@ -814,6 +822,10 @@ impl GpuRenderer {
         };
         unsafe {
             let gl = &self.gl;
+            if self.frame <= 2 {
+                (gl.Finish)();
+                trace("meshes drawn");
+            }
             let one = [GL_COLOR_ATTACHMENT0];
             (gl.DrawBuffers)(1, one.as_ptr());
             (gl.Disable)(GL_CULL_FACE);
@@ -884,7 +896,12 @@ impl GpuRenderer {
         }
 
         // --- Считывание: цвет, идентификаторы, глубина (с переворотом по вертикали).
+        let tr = self.frame <= 2;
         unsafe {
+            if tr {
+                (self.gl.Finish)();
+                trace("geometry drawn");
+            }
             self.disable_attribs();
             let gl = &self.gl;
             (gl.DepthMask)(1);
@@ -896,6 +913,9 @@ impl GpuRenderer {
             let one = [GL_COLOR_ATTACHMENT0];
             (gl.DrawBuffers)(1, one.as_ptr());
             read_attachment(gl, 0, w, h, GL_BGRA, &mut self.readback);
+            if tr {
+                trace("color read");
+            }
             for y in 0..h {
                 let src = &self.readback[(h - 1 - y) * w..(h - y) * w];
                 let dst = &mut fb.color[y * w..(y + 1) * w];
@@ -904,6 +924,9 @@ impl GpuRenderer {
                 }
             }
             read_attachment(gl, 1, w, h, GL_RGBA, &mut self.readback);
+            if tr {
+                trace("ids read");
+            }
             for y in 0..h {
                 let src = &self.readback[(h - 1 - y) * w..(h - y) * w];
                 let dst = &mut fb.ids[y * w..(y + 1) * w];
@@ -912,6 +935,9 @@ impl GpuRenderer {
                 }
             }
             (gl.ReadPixels)(0, 0, w as GLsizei, h as GLsizei, GL_DEPTH_COMPONENT, GL_FLOAT, self.depth_tmp.as_mut_ptr() as *mut c_void);
+            if tr {
+                trace("depth read");
+            }
             // Глубина окна → «близость» программного рендера (1/w или 1 − z_ndc).
             let m = &proj.m;
             for y in 0..h {
