@@ -55,15 +55,19 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
+          set +e
           # Раннер без видеокарты: подкладываем Mesa (opengl32.dll) рядом с exe — только для теста.
           npm pack @gjsify/gl-runtime-win32-x64 --silent
           mkdir -p mesa gputest
           tar xzf gjsify-gl-runtime-win32-x64-*.tgz -C mesa
           cp target/release/alphacad.exe mesa/package/bin/opengl32.dll mesa/package/bin/libgallium_wgl.dll gputest/
-          ./target/release/alphacad.exe snapshot ui-windows-cpu.png --render cpu --script box,ok,cylinder,sphere
-          ./gputest/alphacad.exe snapshot ui-windows-gpu.png --require-gpu --script box,ok,cylinder,sphere
-          ./gputest/alphacad.exe snapshot ui-windows-gpu-dark.png --require-gpu --theme dark --script box,ok,cylinder,wire
-          ./target/release/alphacad.exe snapshot ui-windows-gpu-fallback.png --render gpu --script box,ok
+          snap() { out=$("$@" 2>&1); rc=$?; echo "$out"; echo "::notice title=GPU test (Windows)::rc=$rc $(echo "$out" | tr '\n' ' ' | cut -c1-400)"; return $rc; }
+          snap ./target/release/alphacad.exe snapshot ui-windows-cpu.png --render cpu --script box,ok,cylinder,sphere
+          snap ./gputest/alphacad.exe snapshot ui-windows-gpu.png --require-gpu --script box,ok,cylinder,sphere
+          snap ./gputest/alphacad.exe snapshot ui-windows-gpu-dark.png --require-gpu --theme dark --script box,ok,cylinder,wire
+          snap ./target/release/alphacad.exe snapshot ui-windows-gpu-fallback.png --render gpu --script box,ok
+          python -m pip install -q pillow
+          python -c "from PIL import Image, ImageChops; a=Image.open('ui-windows-cpu.png').convert('RGB'); b=Image.open('ui-windows-gpu.png').convert('RGB'); d=ImageChops.difference(a,b).convert('L'); h=d.histogram(); n=sum(h); print('::notice title=GPU vs CPU (Windows)::differing pixels >24: %.2f%%' % (100.0*sum(h[25:])/n))" || true
       - name: Inno Setup (6.7+ for dark wizard with background image)
         shell: pwsh
         run: |
@@ -122,9 +126,11 @@ jobs:
       - name: GPU renderer test (OpenGL via CGL)
         continue-on-error: true
         run: |
-          ./target/universal/alphacad snapshot ui-macos-cpu.png --render cpu --script box,ok,cylinder,sphere
-          ./target/universal/alphacad snapshot ui-macos-gpu.png --render gpu --script box,ok,cylinder,sphere
-          ALPHACAD_GL_SOFTWARE=1 ./target/universal/alphacad snapshot ui-macos-gpu-sw.png --require-gpu --script box,ok,cylinder,sphere
+          set +e
+          snap() { out=$("$@" 2>&1); rc=$?; echo "$out"; echo "::notice title=GPU test (macOS)::rc=$rc $(echo "$out" | tr '\n' ' ' | cut -c1-400)"; return $rc; }
+          snap ./target/universal/alphacad snapshot ui-macos-cpu.png --render cpu --script box,ok,cylinder,sphere
+          snap ./target/universal/alphacad snapshot ui-macos-gpu.png --render gpu --script box,ok,cylinder,sphere
+          ALPHACAD_GL_SOFTWARE=1 snap ./target/universal/alphacad snapshot ui-macos-gpu-sw.png --require-gpu --script box,ok,cylinder,sphere
       - name: App bundle
         run: |
           VER="${{ steps.ver.outputs.version }}"
