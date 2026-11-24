@@ -81,6 +81,8 @@ fn interpret(text: &str, success: bool, code: Option<i32>) -> Result<(), String>
     // Последний пройденный этап помогает понять, где упал драйвер.
     let stage = last.strip_prefix("STAGE ").unwrap_or("запуск");
     Err(match code {
+        // Коды Windows (NTSTATUS/HRESULT) отрицательны — их принято писать в hex.
+        Some(c) if c < 0 => format!("драйвер OpenGL аварийно завершился (код 0x{:08X}, этап: {stage})", c as u32),
         Some(c) => format!("драйвер OpenGL аварийно завершился (код {c}, этап: {stage})"),
         None => format!("драйвер OpenGL аварийно завершился (этап: {stage})"),
     })
@@ -163,5 +165,6 @@ mod tests {
         let e = interpret("STAGE контекст\nSTAGE пробный кадр\n", false, Some(87)).unwrap_err();
         assert!(e.contains("87") && e.contains("пробный кадр"), "{e}");
         assert!(interpret("", false, None).unwrap_err().contains("запуск"));
+        assert!(interpret("", false, Some(-2147024809)).unwrap_err().contains("0x80070057"));
     }
 }
