@@ -111,7 +111,6 @@ macro_rules! gl_api {
 }
 
 gl_api! {
-    GetString(GLenum) -> *const u8 = "glGetString";
     GetError() -> GLenum = "glGetError";
     GetIntegerv(GLenum, *mut GLint) = "glGetIntegerv";
     Viewport(GLint, GLint, GLsizei, GLsizei) = "glViewport";
@@ -178,6 +177,15 @@ gl_api! {
 pub(crate) trait GlContext {
     fn make_current(&self) -> bool;
     fn get_proc(&self, name: &[u8]) -> *const c_void;
+}
+
+/// Диагностика инициализации OpenGL в stderr (переменная `ALPHACAD_GL_TRACE=1`).
+pub(crate) fn trace(msg: &str) {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    if *ON.get_or_init(|| std::env::var("ALPHACAD_GL_TRACE").map(|v| v == "1").unwrap_or(false)) {
+        eprintln!("[gl] {msg}");
+    }
 }
 
 #[allow(unreachable_code)]
@@ -458,14 +466,22 @@ pub struct GpuRenderer {
 impl GpuRenderer {
     /// Создание контекста и ресурсов. Ошибка — GPU недоступен (используйте CPU).
     pub fn new() -> Result<GpuRenderer, String> {
+        trace("create context");
         let ctx = create_context()?;
         if !ctx.make_current() {
             return Err("не удалось активировать контекст OpenGL".into());
         }
+        trace("context current");
         unsafe {
-            let gl = Gl::load(&|n| ctx.get_proc(n))?;
+            // Сначала версия и название драйвера — чтобы старый драйвер давал
+            // понятное сообщение, а не «нет функции …».
+            let gs = ctx.get_proc(b"glGetString\0");
+            if gs.is_null() {
+                return Err("OpenGL: нет функции glGetString".into());
+            }
+            let get_string: unsafe extern "system" fn(GLenum) -> *const u8 = std::mem::transmute(gs);
             let s = |e| {
-                let p = (gl.GetString)(e);
+                let p = get_string(e);
                 if p.is_null() {
                     String::new()
                 } else {
@@ -474,12 +490,15 @@ impl GpuRenderer {
             };
             let (vendor, renderer, version) = (s(GL_VENDOR), s(GL_RENDERER), s(GL_VERSION));
             let major: u32 = version.split(|c: char| !c.is_ascii_digit()).next().and_then(|v| v.parse().ok()).unwrap_or(0);
-            if major < 2 {
-                return Err(format!("требуется OpenGL 2.1+, драйвер: {version} ({renderer})"));
-            }
+            trace(&format!("driver: {vendor} | {renderer} | {version}"));
             if renderer.contains("GDI Generic") {
                 return Err("нет драйвера видеокарты (GDI Generic)".into());
             }
+            if major < 2 {
+                return Err(format!("требуется OpenGL 2.1+, драйвер: {version} ({renderer})"));
+            }
+            let gl = Gl::load(&|n| ctx.get_proc(n))?;
+            trace("functions loaded");
             let tri = program(
                 &gl,
                 TRI_VS,
@@ -489,6 +508,7 @@ impl GpuRenderer {
             )?;
             let line = program(&gl, LINE_VS, LINE_FS, &["a_a", "a_b", "a_corner", "a_color", "a_wd"], &["u_mvp", "u_vp", "u_bias_c", "u_bias_w"])?;
             let bg = program(&gl, BG_VS, BG_FS, &["a_pos", "a_col"], &[])?;
+            trace("shaders compiled");
             let mut fbo = 0;
             (gl.GenFramebuffers)(1, &mut fbo);
             let mut rb = [0u32; 3];
@@ -545,6 +565,7 @@ impl GpuRenderer {
             return Err(format!("FBO не собран (0x{st:X})"));
         }
         self.size = (w, h);
+        trace(&format!("FBO {w}x{h} ready"));
         Ok(())
     }
 

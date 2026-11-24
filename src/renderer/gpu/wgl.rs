@@ -61,6 +61,7 @@ extern "system" {
     fn LoadLibraryW(name: *const u16) -> HMODULE;
     fn GetProcAddress(module: HMODULE, name: *const u8) -> *mut c_void;
     fn GetModuleHandleW(name: *const u16) -> HMODULE;
+    fn GetModuleFileNameW(module: HMODULE, buf: *mut u16, size: u32) -> u32;
 }
 
 #[link(name = "user32")]
@@ -83,6 +84,8 @@ type WglCreateContext = unsafe extern "system" fn(HDC) -> HGLRC;
 type WglMakeCurrent = unsafe extern "system" fn(HDC, HGLRC) -> i32;
 type WglDeleteContext = unsafe extern "system" fn(HGLRC) -> i32;
 type WglGetProcAddress = unsafe extern "system" fn(*const u8) -> *const c_void;
+type WglChoosePixelFormat = unsafe extern "system" fn(HDC, *const PIXELFORMATDESCRIPTOR) -> i32;
+type WglSetPixelFormat = unsafe extern "system" fn(HDC, i32, *const PIXELFORMATDESCRIPTOR) -> i32;
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -119,6 +122,18 @@ impl WglContext {
             let delete_context: WglDeleteContext = std::mem::transmute(d);
             let get_proc: WglGetProcAddress = std::mem::transmute(g);
 
+            // Путь загруженной библиотеки: системная opengl32 (System32) работает
+            // через GDI, а сторонняя (например, Mesa рядом с exe) — только через
+            // собственные wglChoosePixelFormat/wglSetPixelFormat.
+            let mut path = [0u16; 520];
+            let n = GetModuleFileNameW(lib, path.as_mut_ptr(), path.len() as u32) as usize;
+            let lib_path = String::from_utf16_lossy(&path[..n.min(path.len())]);
+            let low = lib_path.to_ascii_lowercase();
+            let system = low.contains("\\system32\\") || low.contains("\\syswow64\\");
+            super::trace(&format!("opengl32: {lib_path} (system: {system})"));
+            let wgl_choose = sym(b"wglChoosePixelFormat\0");
+            let wgl_set = sym(b"wglSetPixelFormat\0");
+
             let inst = GetModuleHandleW(std::ptr::null());
             let class = wide("AlphaCadGL");
             let wc = WNDCLASSW {
@@ -152,13 +167,25 @@ impl WglContext {
                 c_stencil_bits: 8,
                 ..Default::default()
             };
-            let fmt = ChoosePixelFormat(dc, &pfd);
-            if fmt == 0 || SetPixelFormat(dc, fmt, &pfd) == 0 {
+            let (fmt, ok) = if !system && !wgl_choose.is_null() && !wgl_set.is_null() {
+                let choose: WglChoosePixelFormat = std::mem::transmute(wgl_choose);
+                let set: WglSetPixelFormat = std::mem::transmute(wgl_set);
+                let f = choose(dc, &pfd);
+                super::trace(&format!("wglChoosePixelFormat -> {f}"));
+                (f, f != 0 && set(dc, f, &pfd) != 0)
+            } else {
+                let f = ChoosePixelFormat(dc, &pfd);
+                super::trace(&format!("ChoosePixelFormat -> {f}"));
+                (f, f != 0 && SetPixelFormat(dc, f, &pfd) != 0)
+            };
+            super::trace(&format!("SetPixelFormat ok: {ok}"));
+            if fmt == 0 || !ok {
                 ReleaseDC(hwnd, dc);
                 DestroyWindow(hwnd);
                 return Err("формат пикселей OpenGL не поддерживается".into());
             }
             let rc = create(dc);
+            super::trace(&format!("wglCreateContext ok: {}", !rc.is_null()));
             if rc.is_null() {
                 ReleaseDC(hwnd, dc);
                 DestroyWindow(hwnd);
