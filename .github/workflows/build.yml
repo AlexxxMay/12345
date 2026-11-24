@@ -78,7 +78,7 @@ jobs:
 
   macos:
     name: macOS 12+ universal (Intel + Apple Silicon)
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     env:
       MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
