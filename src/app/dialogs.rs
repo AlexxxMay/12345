@@ -147,12 +147,12 @@ impl State {
         ui.panel(r, 6.0);
         // Заголовок (тёмный, как в командных диалогах).
         let hr = Rect::new(r.x, r.y, r.w, 36.0 * s);
-        ui.fb.fill_rounded(Rect::new(hr.x, hr.y, hr.w, hr.h), 6.0 * s, theme::APPBAR);
-        ui.fb.fill_rect(Rect::new(hr.x, hr.bottom() - 6.0 * s, hr.w, 6.0 * s), theme::APPBAR);
+        ui.fb.fill_rounded(Rect::new(hr.x, hr.y, hr.w, hr.h), 6.0 * s, theme::APPBAR());
+        ui.fb.fill_rect(Rect::new(hr.x, hr.bottom() - 6.0 * s, hr.w, 6.0 * s), theme::APPBAR());
         let ib = Rect::new(hr.x + 8.0 * s, hr.y + 6.0 * s, 24.0 * s, 24.0 * s);
-        ui.fb.fill_rounded(ib, 4.0 * s, 0xFFF5_F6F8);
-        ui.icon(icon, ib.shrink(2.0 * s), theme::TEXT);
-        ui.text_in(Rect::new(hr.x + 40.0 * s, hr.y, hr.w - 50.0 * s, hr.h), &title.to_uppercase(), 12.5, theme::APPBAR_TEXT, 0);
+        ui.fb.fill_rounded(ib, 4.0 * s, theme::INFO_BOX());
+        ui.icon(icon, ib.shrink(2.0 * s), theme::TEXT());
+        ui.text_in(Rect::new(hr.x + 40.0 * s, hr.y, hr.w - 50.0 * s, hr.h), &title.to_uppercase(), 12.5, theme::APPBAR_TEXT(), 0);
 
         let x0 = r.x + 12.0 * s;
         let w0 = r.w - 24.0 * s;
@@ -164,13 +164,13 @@ impl State {
 
         match &mut d {
             Dialog::Primitive { prim } => {
-                ui.text_in(Rect::new(x0, y, w0, 20.0 * s), t("Тело встанет на плоскость XY рядом с моделью", "Placed on the XY plane next to the model"), 11.5, theme::TEXT_DIM, 0);
+                ui.text_in(Rect::new(x0, y, w0, 20.0 * s), t("Тело встанет на плоскость XY рядом с моделью", "Placed on the XY plane next to the model"), 11.5, theme::TEXT_DIM(), 0);
                 y += row;
                 edit_primitive(ui, prim, x0, &mut y, w0, row, "dlg_prim");
             }
             Dialog::SketchPlane => {
                 show_ok = false;
-                ui.text_in(Rect::new(x0, y, w0, 20.0 * s), t("Выберите плоскость эскиза:", "Choose the sketch plane:"), 12.0, theme::TEXT, 0);
+                ui.text_in(Rect::new(x0, y, w0, 20.0 * s), t("Выберите плоскость эскиза:", "Choose the sketch plane:"), 12.0, theme::TEXT(), 0);
                 y += row;
                 let planes = [
                     (crate::sketch::SketchPlane::Xy, t("XY — вид сверху", "XY — top")),
@@ -181,10 +181,10 @@ impl State {
                     let br = Rect::new(x0, y, w0, 34.0 * s);
                     let id = crate::ui::id_idx(id_of("dlg_plane"), i);
                     let (hov, _, clicked) = ui.interact(id, br);
-                    ui.fb.fill_rounded(br, 4.0 * s, if hov { theme::HOVER } else { theme::FIELD });
-                    ui.fb.stroke_rounded(br, 4.0 * s, 1.0, if hov { theme::ACCENT } else { theme::FIELD_BORDER });
-                    ui.icon(Icon::Plane, Rect::new(br.x + 8.0 * s, br.y + 5.0 * s, 24.0 * s, 24.0 * s), theme::TEXT);
-                    ui.text_in(Rect::new(br.x + 40.0 * s, br.y, br.w - 44.0 * s, br.h), name, 12.5, theme::TEXT, 0);
+                    ui.fb.fill_rounded(br, 4.0 * s, if hov { theme::HOVER() } else { theme::FIELD() });
+                    ui.fb.stroke_rounded(br, 4.0 * s, 1.0, if hov { theme::ACCENT() } else { theme::FIELD_BORDER() });
+                    ui.icon(Icon::Plane, Rect::new(br.x + 8.0 * s, br.y + 5.0 * s, 24.0 * s, 24.0 * s), theme::TEXT());
+                    ui.text_in(Rect::new(br.x + 40.0 * s, br.y, br.w - 44.0 * s, br.h), name, 12.5, theme::TEXT(), 0);
                     if clicked {
                         let plane = *pl;
                         self.begin_sketch(plane, None);
@@ -224,7 +224,7 @@ impl State {
                 }
                 let ok = extrude_mesh(self, *sketch, *distance, *symmetric).is_some();
                 if !ok {
-                    ui.text_in(Rect::new(x0, y, w0, 20.0 * s), t("Нет замкнутых профилей в эскизе", "No closed profiles in the sketch"), 11.5, theme::DANGER, 0);
+                    ui.text_in(Rect::new(x0, y, w0, 20.0 * s), t("Нет замкнутых профилей в эскизе", "No closed profiles in the sketch"), 11.5, theme::DANGER(), 0);
                 }
                 ok_enabled = ok;
             }
@@ -248,7 +248,7 @@ impl State {
                 ui.checkbox(id_of("dlg_cb_keep"), Rect::new(x0, y, w0, 24.0 * s), t("Сохранить тело-инструмент", "Keep tool body"), keep);
                 y += row;
                 ok_enabled = *tool != 0 && *target != 0 && tool != target;
-                ui.text_in(Rect::new(x0, y, w0, 18.0 * s), t("Тела должны быть замкнутыми", "Bodies should be watertight"), 11.0, theme::TEXT_DIM, 0);
+                ui.text_in(Rect::new(x0, y, w0, 18.0 * s), t("Тела должны быть замкнутыми", "Bodies should be watertight"), 11.0, theme::TEXT_DIM(), 0);
             }
             Dialog::Mirror { plane, copy } => {
                 let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Плоскость", "Plane"), 100.0);
@@ -264,7 +264,7 @@ impl State {
                 ui.number_field(id_of("dlg_rd_pct"), fr, percent, "%", 5.0, 1.0, 100.0);
                 y += row;
                 let target = ((tris as f32) * *percent / 100.0) as usize;
-                ui.text_in(Rect::new(x0, y, w0, 22.0 * s), &format!("{} → {} {}", fmt_count(tris), fmt_count(target), t("треуг.", "tris")), 12.0, theme::TEXT, 0);
+                ui.text_in(Rect::new(x0, y, w0, 22.0 * s), &format!("{} → {} {}", fmt_count(tris), fmt_count(target), t("треуг.", "tris")), 12.0, theme::TEXT(), 0);
                 y += row;
                 ok_label = t("Упростить", "Reduce");
             }
@@ -342,10 +342,10 @@ impl State {
         ui.fb.reset_clip();
         let full = Rect::new(0.0, 0.0, fw, fh);
         ui.region(full);
-        ui.fb.fill_rect(full, 0x50101418);
+        ui.fb.fill_rect(full, theme::MODAL_DIM());
         let (w, h) = match &d {
-            Dialog::Settings => (460.0, 470.0),
-            Dialog::Help => (640.0, 440.0),
+            Dialog::Settings => (500.0, 545.0),
+            Dialog::Help => (640.0, 490.0),
             Dialog::Info { .. } => (420.0, 340.0),
             Dialog::Message { text, .. } => (440.0, 150.0 + 18.0 * (text.len() as f32 / 50.0).ceil()),
             _ => (440.0, 170.0),
@@ -361,7 +361,7 @@ impl State {
             Dialog::Message { title, .. } => title.clone(),
             _ => String::new(),
         };
-        ui.text(r.x + 18.0 * s, r.y + 14.0 * s, &title, 15.0, theme::TEXT);
+        ui.text(r.x + 18.0 * s, r.y + 14.0 * s, &title, 15.0, theme::TEXT());
         if ui.icon_button(id_of("modal_close"), Rect::new(r.right() - 34.0 * s, r.y + 10.0 * s, 24.0 * s, 24.0 * s), Icon::Close, "", false, true) || ui.input.key_pressed(crate::ui::Key::Escape) {
             ui.st.layer = old_layer;
             if matches!(d, Dialog::Settings) {
@@ -384,6 +384,14 @@ impl State {
                     super::set_lang_en(self.cfg.lang_en);
                 }
                 y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Цвет интерфейса", "Interface color"), lw);
+                let mut th = self.cfg.dark_theme as usize;
+                if ui.segmented(id_of("set_theme"), fr, &[t("Светлый", "Light"), t("Тёмный", "Dark")], &mut th) {
+                    self.cfg.dark_theme = th == 1;
+                    theme::set_dark(self.cfg.dark_theme);
+                    self.invalidate_view();
+                }
+                y += row;
                 let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Масштаб интерфейса", "Interface scale"), lw);
                 let scales = [0.9f32, 1.0, 1.25, 1.5];
                 let mut si = scales.iter().position(|v| (v - self.cfg.ui_scale).abs() < 0.01).unwrap_or(1);
@@ -400,6 +408,31 @@ impl State {
                     self.invalidate_view();
                 }
                 y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Расчёт графики", "Graphics rendering"), lw);
+                let mut dev = self.cfg.gpu as usize;
+                if ui.segmented(id_of("set_gpu"), fr, &[t("Процессор", "CPU"), t("Видеокарта", "GPU")], &mut dev) {
+                    self.cfg.gpu = dev == 1;
+                    if self.cfg.gpu {
+                        // Повторная попытка инициализации при каждом включении.
+                        self.gpu_error = None;
+                    } else {
+                        self.gpu = None;
+                    }
+                    self.invalidate_view();
+                }
+                y += 24.0 * s;
+                let status = if !self.cfg.gpu {
+                    t("Многопоточный программный рендер — работает на любом компьютере.", "Multithreaded software renderer — works on any computer.").to_string()
+                } else if let Some(g) = &self.gpu {
+                    format!("{} {}", t("Видеокарта:", "GPU:"), g.info)
+                } else if let Some(e) = &self.gpu_error {
+                    format!("{} {e}. {}", t("Видеокарта недоступна:", "GPU unavailable:"), t("Используется процессор.", "Using the CPU."))
+                } else {
+                    t("Видеокарта будет задействована при следующей отрисовке.", "The GPU will be used on the next redraw.").to_string()
+                };
+                let col = if self.cfg.gpu && self.gpu_error.is_some() { theme::DANGER() } else { theme::TEXT_DIM() };
+                ui.text_in(Rect::new(x0, y, w0, 18.0 * s), &status, 11.0, col, 0);
+                y += 26.0 * s;
                 let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Потоков рендера", "Render threads"), lw);
                 let mut th = self.cfg.threads as f32;
                 let fw2 = fr.w * 0.4;
@@ -407,7 +440,7 @@ impl State {
                     self.cfg.threads = th as usize;
                     self.invalidate_view();
                 }
-                ui.text_in(Rect::new(fr.x + fw2 + 8.0 * s, fr.y, fr.w - fw2 - 8.0 * s, fr.h), &format!("0 = {} ({})", t("авто", "auto"), crate::renderer::software::default_threads()), 11.5, theme::TEXT_DIM, 0);
+                ui.text_in(Rect::new(fr.x + fw2 + 8.0 * s, fr.y, fr.w - fw2 - 8.0 * s, fr.h), &format!("0 = {} ({})", t("авто", "auto"), crate::renderer::software::default_threads()), 11.5, theme::TEXT_DIM(), 0);
                 y += row;
                 let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Угол рёбер, °", "Edge angle, °"), lw);
                 let mut cr = self.cfg.crease_deg;
@@ -471,23 +504,33 @@ impl State {
                     let cy = y + (i % 10) as f32 * 26.0 * s;
                     let kw = ui.text_width(k, 11.5) + 12.0 * s;
                     let kr = Rect::new(cx, cy + 2.0 * s, kw, 20.0 * s);
-                    ui.fb.fill_rounded(kr, 3.0 * s, theme::PANEL_HEADER);
-                    ui.text_in(kr, k, 11.5, theme::TEXT, 1);
-                    ui.text_in(Rect::new(cx + kw + 8.0 * s, cy, col_w - kw - 14.0 * s, 24.0 * s), v, 11.5, theme::TEXT_DIM, 0);
+                    ui.fb.fill_rounded(kr, 3.0 * s, theme::PANEL_HEADER());
+                    ui.text_in(kr, k, 11.5, theme::TEXT(), 1);
+                    ui.text_in(Rect::new(cx + kw + 8.0 * s, cy, col_w - kw - 14.0 * s, 24.0 * s), v, 11.5, theme::TEXT_DIM(), 0);
                 }
                 y += 10.0 * 26.0 * s + 14.0 * s;
-                ui.fb.fill_rect(Rect::new(x0, y, w0, 1.0), theme::TOOLBAR_BORDER);
+                ui.fb.fill_rect(Rect::new(x0, y, w0, 1.0), theme::TOOLBAR_BORDER());
                 y += 12.0 * s;
                 let about = [
-                    format!("ForgeCAD {} — {}", crate::VERSION, t("лёгкий 3D CAD-редактор на Rust", "a lightweight 3D CAD editor in Rust")),
-                    t("Форматы: STL (двоичный/ASCII), STEP AP203/AP214, OBJ, PLY, проект .forge", "Formats: STL (binary/ASCII), STEP AP203/AP214, OBJ, PLY, .forge project").to_string(),
-                    t("Программный многопоточный рендер — работает без видеокарты.", "Multithreaded software renderer — runs without a GPU.").to_string(),
+                    format!("AlphaCad {} — {}", crate::VERSION, t("лёгкий 3D CAD-редактор на Rust", "a lightweight 3D CAD editor in Rust")),
+                    t("Форматы: STL (двоичный/ASCII), STEP AP203/AP214, 3MF, OBJ, PLY, проект .acad", "Formats: STL (binary/ASCII), STEP AP203/AP214, 3MF, OBJ, PLY, .acad project").to_string(),
+                    t("Рендер на процессоре (многопоточный) или на видеокарте (OpenGL).", "Rendering on the CPU (multithreaded) or on the GPU (OpenGL).").to_string(),
                     t("Независимая реализация (clean room); не связана с Autodesk.", "Independent clean-room implementation; not affiliated with Autodesk.").to_string(),
                 ];
+                // Логотип слева от описания.
+                let ls = 76.0 * s;
+                crate::ui::icons::draw_logo(ui.fb, Rect::new(x0, y + 2.0 * s, ls, ls));
+                let tx = x0 + ls + 16.0 * s;
                 for (i, l) in about.iter().enumerate() {
-                    ui.text(x0, y, l, if i == 0 { 12.5 } else { 11.5 }, if i == 0 { theme::TEXT } else { theme::TEXT_DIM });
+                    ui.text(tx, y, l, if i == 0 { 12.5 } else { 11.5 }, if i == 0 { theme::TEXT() } else { theme::TEXT_DIM() });
                     y += 20.0 * s;
                 }
+                // Подпись автора — в самом низу окна справки.
+                let sig = "Designed by Alex Abmaev";
+                let sy = r.bottom() - 30.0 * s;
+                ui.fb.fill_rect(Rect::new(x0, sy - 10.0 * s, w0, 1.0), theme::TOOLBAR_BORDER());
+                let sw = ui.text_width(sig, 12.0);
+                ui.text(r.x + (r.w - sw) * 0.5, sy, sig, 12.0, theme::TEXT_DIM());
             }
             Dialog::Info { id } => {
                 if let Some(idx) = self.scene.index_of(*id) {
@@ -511,7 +554,7 @@ impl State {
                     ];
                     for (k, v) in lines.iter() {
                         let fr = ui.labeled(Rect::new(x0, y, w0, 24.0 * s), k, 150.0);
-                        ui.text_in(fr, v, 12.5, theme::TEXT, 0);
+                        ui.text_in(fr, v, 12.5, theme::TEXT(), 0);
                         y += 26.0 * s;
                     }
                     let bw = (w0 - 8.0 * s) * 0.5;
@@ -527,7 +570,7 @@ impl State {
                 }
             }
             Dialog::ConfirmQuit | Dialog::ConfirmDiscard { .. } => {
-                ui.text(x0, y, t("Сохранить изменения в проекте?", "Save changes to the project?"), 12.5, theme::TEXT);
+                ui.text(x0, y, t("Сохранить изменения в проекте?", "Save changes to the project?"), 12.5, theme::TEXT());
                 let by = r.bottom() - 44.0 * s;
                 let bw = (w0 - 16.0 * s) / 3.0;
                 let then = match &d {
@@ -568,7 +611,7 @@ impl State {
             }
             Dialog::Message { text, .. } => {
                 for (i, line) in wrap(ui, text, 12.0, w0).iter().enumerate() {
-                    ui.text(x0, y + i as f32 * 18.0 * s, line, 12.0, theme::TEXT);
+                    ui.text(x0, y + i as f32 * 18.0 * s, line, 12.0, theme::TEXT());
                 }
                 if ui.button(id_of("msg_ok"), Rect::new(r.right() - 110.0 * s, r.bottom() - 44.0 * s, 92.0 * s, 28.0 * s), "OK", true) || ui.input.key_pressed(crate::ui::Key::Enter) {
                     keep = false;

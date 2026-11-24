@@ -16,6 +16,7 @@ pub enum ExportKind {
     StlBinary,
     StlAscii,
     Step,
+    ThreeMf,
     Obj,
     Ply,
 }
@@ -53,6 +54,8 @@ impl PrimKind {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
     New,
+    /// Новое окно (отдельный процесс) с пустым рабочим пространством.
+    NewWindow,
     Open,
     Import,
     Save,
@@ -103,7 +106,7 @@ pub enum Action {
     Escape,
 }
 
-const MODEL_EXTS: &[&str] = &["stl", "step", "stp", "obj", "ply", "forge"];
+const MODEL_EXTS: &[&str] = &["stl", "step", "stp", "3mf", "obj", "ply", "acad", "forge"];
 
 impl State {
     fn view_aspect(&self) -> f32 {
@@ -164,6 +167,11 @@ impl State {
                     self.reset_document();
                 }
             }
+            Action::NewWindow => {
+                if let Err(e) = spawn_new_window() {
+                    self.toast(&format!("{}: {e}", t("Не удалось открыть новое окно", "Could not open a new window")), true);
+                }
+            }
             Action::Open => {
                 if self.is_dirty() {
                     self.dialog = Some(Dialog::ConfirmDiscard { then: Action::Open });
@@ -183,7 +191,7 @@ impl State {
             Action::OpenRecent(i) => {
                 let Some(p) = self.cfg.recent.get(i).cloned() else { return };
                 let path = PathBuf::from(&p);
-                let is_project = formats::format_of_path(&path) == Some(ModelFormat::ForgeProject);
+                let is_project = formats::format_of_path(&path) == Some(ModelFormat::Project);
                 if is_project && self.is_dirty() {
                     self.dialog = Some(Dialog::ConfirmDiscard { then: a });
                     return;
@@ -482,9 +490,10 @@ impl State {
             (t("Все модели", "All models"), MODEL_EXTS),
             ("STL", &["stl"]),
             ("STEP", &["step", "stp"]),
+            ("3MF", &["3mf"]),
             ("OBJ", &["obj"]),
             ("PLY", &["ply"]),
-            (t("Проект ForgeCAD", "ForgeCAD project"), &["forge"]),
+            (t("Проект AlphaCad", "AlphaCad project"), &["acad"]),
         ]
     }
 
@@ -497,7 +506,7 @@ impl State {
         for path in files {
             let fmt = formats::format_of_path(&path);
             match fmt {
-                Some(ModelFormat::ForgeProject) => match formats::project::load_project(&path) {
+                Some(ModelFormat::Project) => match formats::project::load_project(&path) {
                     Ok(scene) => {
                         if open || self.scene.bodies.is_empty() {
                             self.reset_document();
@@ -569,12 +578,12 @@ impl State {
                     .as_ref()
                     .and_then(|p| p.file_name())
                     .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| format!("{}.forge", t("Проект", "Project")));
-                let Some(mut p) = crate::platform::save_file_dialog(t("Сохранить проект", "Save project"), &def, &[(t("Проект ForgeCAD", "ForgeCAD project"), &["forge"])]) else {
+                    .unwrap_or_else(|| format!("{}.acad", t("Проект", "Project")));
+                let Some(mut p) = crate::platform::save_file_dialog(t("Сохранить проект", "Save project"), &def, &[(t("Проект AlphaCad", "AlphaCad project"), &["acad"])]) else {
                     return false;
                 };
                 if p.extension().is_none() {
-                    p.set_extension("forge");
+                    p.set_extension("acad");
                 }
                 p
             }
@@ -631,11 +640,13 @@ impl State {
         let (ext, label): (&'static str, &'static str) = match kind {
             ExportKind::StlBinary | ExportKind::StlAscii => ("stl", "STL"),
             ExportKind::Step => ("step", "STEP"),
+            ExportKind::ThreeMf => ("3mf", "3MF"),
             ExportKind::Obj => ("obj", "OBJ"),
             ExportKind::Ply => ("ply", "PLY"),
         };
         let exts: &'static [&'static str] = match kind {
             ExportKind::Step => &["step", "stp"],
+            ExportKind::ThreeMf => &["3mf"],
             ExportKind::StlBinary | ExportKind::StlAscii => &["stl"],
             ExportKind::Obj => &["obj"],
             ExportKind::Ply => &["ply"],
@@ -840,12 +851,31 @@ impl State {
     }
 }
 
+/// Запуск ещё одного экземпляра программы — новое окно со своим проектом.
+///
+/// Отдельный процесс надёжнее нескольких окон в одном: проекты полностью
+/// независимы, а сбой в одном окне не затрагивает другие.
+pub fn spawn_new_window() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    // macOS: внутри .app запускаем через `open -n`, чтобы окно получило фокус
+    // и корректно отображалось в Dock.
+    if cfg!(target_os = "macos") {
+        let s = exe.to_string_lossy();
+        if let Some(pos) = s.find(".app/Contents/MacOS/") {
+            let bundle = &s[..pos + 4];
+            return std::process::Command::new("/usr/bin/open").arg("-n").arg(bundle).spawn().map(|_| ()).map_err(|e| e.to_string());
+        }
+    }
+    std::process::Command::new(exe).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 /// Запись меша в файл экспорта.
 pub fn write_export(mesh: &Mesh, path: &Path, kind: ExportKind) -> Result<(), String> {
     match kind {
         ExportKind::StlAscii => std::fs::write(path, formats::stl::to_ascii(mesh)).map_err(|e| e.to_string()),
         ExportKind::StlBinary => std::fs::write(path, formats::stl::to_binary(mesh)).map_err(|e| e.to_string()),
         ExportKind::Step => formats::save_mesh_as(mesh, path, ModelFormat::Step),
+        ExportKind::ThreeMf => formats::save_mesh_as(mesh, path, ModelFormat::ThreeMf),
         ExportKind::Obj => formats::save_mesh_as(mesh, path, ModelFormat::Obj),
         ExportKind::Ply => formats::save_mesh_as(mesh, path, ModelFormat::Ply),
     }

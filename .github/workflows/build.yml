@@ -28,7 +28,7 @@ jobs:
       - name: CLI smoke test
         run: |
           cargo build --release
-          ./target/release/forgecad snapshot ui.png --script box,ok
+          ./target/release/alphacad snapshot ui.png --script box,ok
           ls -la ui.png
 
   windows:
@@ -49,31 +49,48 @@ jobs:
       - name: Smoke test
         shell: bash
         run: |
-          ./target/release/forgecad.exe snapshot ui-windows.png --script box,ok,cylinder
-          ls -la target/release/forgecad.exe ui-windows.png
-      - name: Inno Setup
+          ./target/release/alphacad.exe snapshot ui-windows.png --script box,ok,cylinder
+          ls -la target/release/alphacad.exe ui-windows.png
+      - name: GPU renderer test (Mesa llvmpipe as the OpenGL driver)
+        shell: bash
+        continue-on-error: true
+        run: |
+          # Раннер без видеокарты: подкладываем Mesa (opengl32.dll) рядом с exe — только для теста.
+          npm pack @gjsify/gl-runtime-win32-x64 --silent
+          mkdir -p mesa gputest
+          tar xzf gjsify-gl-runtime-win32-x64-*.tgz -C mesa
+          cp target/release/alphacad.exe mesa/package/bin/opengl32.dll mesa/package/bin/libgallium_wgl.dll gputest/
+          ./target/release/alphacad.exe snapshot ui-windows-cpu.png --render cpu --script box,ok,cylinder,sphere
+          ./gputest/alphacad.exe snapshot ui-windows-gpu.png --require-gpu --script box,ok,cylinder,sphere
+          ./gputest/alphacad.exe snapshot ui-windows-gpu-dark.png --require-gpu --theme dark --script box,ok,cylinder,wire
+          ./target/release/alphacad.exe snapshot ui-windows-gpu-fallback.png --render gpu --script box,ok
+      - name: Inno Setup (6.7+ for dark wizard with background image)
         shell: pwsh
         run: |
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
-            choco install innosetup -y --no-progress
+          choco upgrade innosetup -y --no-progress
+          $cands = @()
+          foreach ($root in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+            if ($root) { $cands += Get-ChildItem -Path $root -Filter ISCC.exe -Recurse -Depth 2 -ErrorAction SilentlyContinue | Where-Object { $_.DirectoryName -like '*Inno Setup*' } }
           }
-          & $iscc "/DMyAppVersion=${{ steps.ver.outputs.version }}" installer\windows\forgecad.iss
+          $iscc = $cands | Sort-Object { [version]$_.VersionInfo.FileVersion } -Descending | Select-Object -First 1
+          if (-not $iscc) { Write-Error "ISCC.exe not found"; exit 1 }
+          Write-Host "Using $($iscc.FullName) $($iscc.VersionInfo.FileVersion)"
+          & $iscc.FullName "/DMyAppVersion=${{ steps.ver.outputs.version }}" installer\windows\alphacad.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Portable zip
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path portable | Out-Null
-          Copy-Item target\release\forgecad.exe portable\
+          Copy-Item target\release\alphacad.exe portable\
           Copy-Item README.md portable\README.txt
-          Compress-Archive -Path portable\* -DestinationPath "target\installer\ForgeCAD-${{ steps.ver.outputs.version }}-windows-x64-portable.zip" -Force
+          Compress-Archive -Path portable\* -DestinationPath "target\installer\AlphaCad-${{ steps.ver.outputs.version }}-windows-x64-portable.zip" -Force
       - uses: actions/upload-artifact@v4
         with:
-          name: ForgeCAD-windows-x64
+          name: AlphaCad-windows-x64
           path: |
             target/installer/*.exe
             target/installer/*.zip
-            ui-windows.png
+            ui-windows*.png
           if-no-files-found: error
 
   macos:
@@ -95,46 +112,83 @@ jobs:
           cargo build --release --target aarch64-apple-darwin
           cargo build --release --target x86_64-apple-darwin
           mkdir -p target/universal
-          lipo -create -output target/universal/forgecad \
-            target/aarch64-apple-darwin/release/forgecad \
-            target/x86_64-apple-darwin/release/forgecad
-          lipo -info target/universal/forgecad
-          otool -l target/aarch64-apple-darwin/release/forgecad | grep -A4 LC_BUILD_VERSION | head -8
+          lipo -create -output target/universal/alphacad \
+            target/aarch64-apple-darwin/release/alphacad \
+            target/x86_64-apple-darwin/release/alphacad
+          lipo -info target/universal/alphacad
+          otool -l target/aarch64-apple-darwin/release/alphacad | grep -A4 LC_BUILD_VERSION | head -8
       - name: Smoke test
-        run: ./target/universal/forgecad snapshot ui-macos.png --script box,ok,cylinder && ls -la ui-macos.png
+        run: ./target/universal/alphacad snapshot ui-macos.png --script box,ok,cylinder && ls -la ui-macos.png
+      - name: GPU renderer test (OpenGL via CGL)
+        continue-on-error: true
+        run: |
+          ./target/universal/alphacad snapshot ui-macos-cpu.png --render cpu --script box,ok,cylinder,sphere
+          ./target/universal/alphacad snapshot ui-macos-gpu.png --render gpu --script box,ok,cylinder,sphere
+          ALPHACAD_GL_SOFTWARE=1 ./target/universal/alphacad snapshot ui-macos-gpu-sw.png --require-gpu --script box,ok,cylinder,sphere
       - name: App bundle
         run: |
           VER="${{ steps.ver.outputs.version }}"
-          APP="target/dmg/ForgeCAD.app"
+          APP="target/dmg/AlphaCad.app"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-          cp target/universal/forgecad "$APP/Contents/MacOS/forgecad"
+          cp target/universal/alphacad "$APP/Contents/MacOS/alphacad"
           sed "s/@VERSION@/$VER/g" installer/macos/Info.plist > "$APP/Contents/Info.plist"
           printf 'APPL????' > "$APP/Contents/PkgInfo"
-          ICONSET=target/ForgeCAD.iconset
+          ICONSET=target/AlphaCad.iconset
           mkdir -p "$ICONSET"
           for s in 16 32 128 256 512; do
             sips -z $s $s assets/icon/icon-1024.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
             d=$((s*2))
             sips -z $d $d assets/icon/icon-1024.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
           done
-          iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/ForgeCAD.icns"
+          iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AlphaCad.icns"
           cp README.md "$APP/Contents/Resources/README.txt"
           codesign --force --deep --sign - "$APP"
           codesign --verify --verbose "$APP"
-      - name: DMG
+      - name: DMG (dark background with logo)
         run: |
           VER="${{ steps.ver.outputs.version }}"
-          ln -s /Applications target/dmg/Applications
           mkdir -p target/out
-          hdiutil create -volname "ForgeCAD $VER" -srcfolder target/dmg -ov -format UDZO "target/out/ForgeCAD-$VER-macos-universal.dmg"
-          (cd target/dmg && ditto -c -k --keepParent ForgeCAD.app "../out/ForgeCAD-$VER-macos-universal.app.zip")
+          (cd target/dmg && ditto -c -k --keepParent AlphaCad.app "../out/AlphaCad-$VER-macos-universal.app.zip")
+          ln -s /Applications target/dmg/Applications
+          mkdir -p target/dmg/.background
+          cp installer/macos/dmg-background.png target/dmg/.background/background.png
+          hdiutil create -volname "AlphaCad" -srcfolder target/dmg -ov -format UDRW -fs HFS+ target/rw.dmg
+          DEV=$(hdiutil attach -readwrite -noverify -noautoopen target/rw.dmg | grep -E '^/dev/' | head -1 | awk '{print $1}')
+          sleep 2
+          perl -e 'alarm 120; exec @ARGV' osascript <<'OSA' || echo "::warning::Finder layout skipped"
+          tell application "Finder"
+            tell disk "AlphaCad"
+              open
+              set current view of container window to icon view
+              set toolbar visible of container window to false
+              set statusbar visible of container window to false
+              set the bounds of container window to {200, 120, 840, 520}
+              set opts to the icon view options of container window
+              set arrangement of opts to not arranged
+              set icon size of opts to 112
+              set text size of opts to 13
+              set background picture of opts to file ".background:background.png"
+              set position of item "AlphaCad.app" of container window to {170, 200}
+              set position of item "Applications" of container window to {470, 200}
+              close
+              open
+              update without registering applications
+              delay 2
+              close
+            end tell
+          end tell
+          OSA
+          chmod -Rf go-w /Volumes/AlphaCad || true
+          sync
+          hdiutil detach "$DEV" || hdiutil detach "$DEV" -force
+          hdiutil convert target/rw.dmg -format UDZO -imagekey zlib-level=9 -o "target/out/AlphaCad-$VER-macos-universal.dmg"
           ls -la target/out
       - uses: actions/upload-artifact@v4
         with:
-          name: ForgeCAD-macos-universal
+          name: AlphaCad-macos-universal
           path: |
             target/out/*
-            ui-macos.png
+            ui-macos*.png
           if-no-files-found: error
 
   release:
@@ -152,5 +206,5 @@ jobs:
         run: |
           ls -R artifacts
           files=$(find artifacts -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.dmg' \))
-          gh release create "${GITHUB_REF_NAME}" $files --repo "$GITHUB_REPOSITORY" --title "ForgeCAD ${GITHUB_REF_NAME}" --notes "Сборка ForgeCAD ${GITHUB_REF_NAME}: установщик для Windows x64 и образ DMG для macOS 12+ (Intel и Apple Silicon)." || \
+          gh release create "${GITHUB_REF_NAME}" $files --repo "$GITHUB_REPOSITORY" --title "AlphaCad ${GITHUB_REF_NAME}" --notes "Сборка AlphaCad ${GITHUB_REF_NAME}: установщик для Windows x64 и образ DMG для macOS 12+ (Intel и Apple Silicon). Designed by Alex Abmaev." || \
           gh release upload "${GITHUB_REF_NAME}" $files --repo "$GITHUB_REPOSITORY" --clobber

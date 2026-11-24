@@ -482,6 +482,60 @@ impl Framebuffer {
         }
     }
 
+    /// Рисование RGBA-изображения (8 бит на канал, без премультипликации)
+    /// в прямоугольник `dst` с усреднением по площади (качественное уменьшение).
+    pub fn draw_rgba(&mut self, data: &[u8], w: usize, h: usize, dst: Rect) {
+        if w == 0 || h == 0 || data.len() < w * h * 4 || dst.w < 1.0 || dst.h < 1.0 {
+            return;
+        }
+        let (cx0, cy0, cx1, cy1) = self.clip_bounds();
+        let x0 = (dst.x.floor() as i32).max(cx0);
+        let y0 = (dst.y.floor() as i32).max(cy0);
+        let x1 = (dst.right().ceil() as i32).min(cx1);
+        let y1 = (dst.bottom().ceil() as i32).min(cy1);
+        let sx = w as f32 / dst.w;
+        let sy = h as f32 / dst.h;
+        for y in y0..y1 {
+            let fy0 = ((y as f32 - dst.y) * sy).max(0.0);
+            let fy1 = ((y as f32 + 1.0 - dst.y) * sy).min(h as f32);
+            if fy1 <= fy0 {
+                continue;
+            }
+            let (ry0, ry1) = (fy0 as usize, (fy1.ceil() as usize).max(fy0 as usize + 1).min(h));
+            for x in x0..x1 {
+                let fx0 = ((x as f32 - dst.x) * sx).max(0.0);
+                let fx1 = ((x as f32 + 1.0 - dst.x) * sx).min(w as f32);
+                if fx1 <= fx0 {
+                    continue;
+                }
+                let (rx0, rx1) = (fx0 as usize, (fx1.ceil() as usize).max(fx0 as usize + 1).min(w));
+                // Средние с весом альфы (корректно для прозрачных краёв).
+                let (mut r, mut g, mut b, mut a, mut n) = (0u32, 0u32, 0u32, 0u32, 0u32);
+                for yy in ry0..ry1 {
+                    for xx in rx0..rx1 {
+                        let p = &data[(yy * w + xx) * 4..][..4];
+                        let pa = p[3] as u32;
+                        r += p[0] as u32 * pa;
+                        g += p[1] as u32 * pa;
+                        b += p[2] as u32 * pa;
+                        a += pa;
+                        n += 1;
+                    }
+                }
+                if a == 0 || n == 0 {
+                    continue;
+                }
+                // Частичное покрытие пикселя на краях прямоугольника.
+                let cov_x = (fx1 - fx0) / sx;
+                let cov_y = (fy1 - fy0) / sy;
+                let cov = (cov_x.min(1.0) * cov_y.min(1.0) * 255.0) as u32;
+                let c = ((a / n) << 24) | ((r / a) << 16) | ((g / a) << 8) | (b / a);
+                let i = y as usize * self.width + x as usize;
+                self.color[i] = blend(self.color[i], c, cov);
+            }
+        }
+    }
+
     /// Копирование области другого буфера того же размера.
     pub fn copy_region_from(&mut self, src: &Framebuffer, r: Rect) {
         if src.width != self.width || src.height != self.height {

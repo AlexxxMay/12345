@@ -215,33 +215,188 @@ impl Default for UiState {
     }
 }
 
-/// Тема оформления.
+/// Тема оформления: светлая (по умолчанию) или тёмная «графит».
+///
+/// Цвета — функции, а не константы: тема переключается во время работы.
+#[allow(non_snake_case)]
 pub mod theme {
     use crate::renderer::canvas::rgb;
-    pub const APPBAR: u32 = rgb(0x2E, 0x33, 0x3B);
-    pub const APPBAR_TEXT: u32 = rgb(0xE8, 0xEB, 0xEF);
-    pub const APPBAR_HOVER: u32 = rgb(0x45, 0x4C, 0x57);
-    pub const TOOLBAR: u32 = rgb(0xF5, 0xF6, 0xF8);
-    pub const TOOLBAR_BORDER: u32 = rgb(0xD7, 0xDB, 0xE1);
-    pub const PANEL: u32 = 0xF7FF_FFFF;
-    pub const PANEL_SOLID: u32 = rgb(0xFF, 0xFF, 0xFF);
-    pub const PANEL_HEADER: u32 = rgb(0xEE, 0xF0, 0xF3);
-    pub const BORDER: u32 = rgb(0xC9, 0xCE, 0xD6);
-    pub const TEXT: u32 = rgb(0x24, 0x29, 0x30);
-    pub const TEXT_DIM: u32 = rgb(0x6B, 0x72, 0x7E);
-    pub const TEXT_DISABLED: u32 = rgb(0xA8, 0xAE, 0xB8);
-    pub const HOVER: u32 = rgb(0xE3, 0xEE, 0xFA);
-    pub const PRESSED: u32 = rgb(0xC9, 0xDF, 0xF7);
-    pub const ACCENT: u32 = rgb(0x0A, 0x7B, 0xD8);
-    pub const ACCENT_DARK: u32 = rgb(0x07, 0x5F, 0xA8);
-    pub const ACCENT_SOFT: u32 = rgb(0xD6, 0xE9, 0xFB);
-    pub const SKETCH: u32 = rgb(0xF0, 0x8A, 0x24);
-    pub const FIELD: u32 = rgb(0xFF, 0xFF, 0xFF);
-    pub const FIELD_BORDER: u32 = rgb(0xBF, 0xC5, 0xCE);
-    pub const DANGER: u32 = rgb(0xD9, 0x3B, 0x3B);
-    pub const OK: u32 = rgb(0x2E, 0x9E, 0x5B);
-    pub const TIMELINE: u32 = rgb(0xEC, 0xEE, 0xF1);
-    pub const TOOLTIP: u32 = rgb(0x30, 0x35, 0x3D);
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static DARK: AtomicBool = AtomicBool::new(false);
+
+    /// Включить тёмную тему (`true`) или светлую (`false`).
+    pub fn set_dark(dark: bool) {
+        DARK.store(dark, Ordering::Relaxed);
+    }
+
+    /// Активна ли тёмная тема.
+    #[inline]
+    pub fn is_dark() -> bool {
+        DARK.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    fn pick(light: u32, dark: u32) -> u32 {
+        if is_dark() { dark } else { light }
+    }
+
+    #[inline]
+    pub fn APPBAR() -> u32 {
+        pick(rgb(0x2E, 0x33, 0x3B), rgb(0x1E, 0x1F, 0x22))
+    }
+    #[inline]
+    pub fn APPBAR_TEXT() -> u32 {
+        pick(rgb(0xE8, 0xEB, 0xEF), rgb(0xD0, 0xD3, 0xD8))
+    }
+    #[inline]
+    pub fn APPBAR_HOVER() -> u32 {
+        pick(rgb(0x45, 0x4C, 0x57), rgb(0x3A, 0x3D, 0x42))
+    }
+    #[inline]
+    pub fn APPBAR_DIM() -> u32 {
+        pick(rgb(0x6B, 0x73, 0x80), rgb(0x5E, 0x62, 0x6A))
+    }
+    #[inline]
+    pub fn APPBAR_BORDER() -> u32 {
+        pick(rgb(0x5A, 0x62, 0x6E), rgb(0x4A, 0x4E, 0x55))
+    }
+    #[inline]
+    pub fn TOOLBAR() -> u32 {
+        pick(rgb(0xF5, 0xF6, 0xF8), rgb(0x2B, 0x2D, 0x30))
+    }
+    #[inline]
+    pub fn TOOLBAR_BORDER() -> u32 {
+        pick(rgb(0xD7, 0xDB, 0xE1), rgb(0x1C, 0x1D, 0x20))
+    }
+    #[inline]
+    pub fn PANEL() -> u32 {
+        pick(0xF7FF_FFFF, 0xF52B_2D30)
+    }
+    #[inline]
+    pub fn PANEL_SOLID() -> u32 {
+        pick(rgb(0xFF, 0xFF, 0xFF), rgb(0x2B, 0x2D, 0x30))
+    }
+    #[inline]
+    pub fn PANEL_HEADER() -> u32 {
+        pick(rgb(0xEE, 0xF0, 0xF3), rgb(0x33, 0x35, 0x39))
+    }
+    #[inline]
+    pub fn BORDER() -> u32 {
+        pick(rgb(0xC9, 0xCE, 0xD6), rgb(0x45, 0x48, 0x4E))
+    }
+    #[inline]
+    pub fn TEXT() -> u32 {
+        pick(rgb(0x24, 0x29, 0x30), rgb(0xD0, 0xD3, 0xD8))
+    }
+    #[inline]
+    pub fn TEXT_DIM() -> u32 {
+        pick(rgb(0x6B, 0x72, 0x7E), rgb(0x9A, 0x9F, 0xA8))
+    }
+    #[inline]
+    pub fn TEXT_DISABLED() -> u32 {
+        pick(rgb(0xA8, 0xAE, 0xB8), rgb(0x63, 0x67, 0x6E))
+    }
+    #[inline]
+    pub fn HOVER() -> u32 {
+        pick(rgb(0xE3, 0xEE, 0xFA), rgb(0x3A, 0x3E, 0x45))
+    }
+    #[inline]
+    pub fn PRESSED() -> u32 {
+        pick(rgb(0xC9, 0xDF, 0xF7), rgb(0x2F, 0x4A, 0x66))
+    }
+    #[inline]
+    pub fn ACCENT() -> u32 {
+        pick(rgb(0x0A, 0x7B, 0xD8), rgb(0x2D, 0x8C, 0xE6))
+    }
+    #[inline]
+    pub fn ACCENT_DARK() -> u32 {
+        pick(rgb(0x07, 0x5F, 0xA8), rgb(0x1F, 0x6F, 0xBF))
+    }
+    #[inline]
+    pub fn ACCENT_SOFT() -> u32 {
+        pick(rgb(0xD6, 0xE9, 0xFB), rgb(0x25, 0x3D, 0x56))
+    }
+    #[inline]
+    pub fn ACCENT_HOVER() -> u32 {
+        pick(rgb(0x20, 0x8A, 0xE6), rgb(0x45, 0x9C, 0xEE))
+    }
+    #[inline]
+    pub fn FOCUS_RING() -> u32 {
+        pick(rgb(0x8C, 0xBF, 0xEA), rgb(0x3D, 0x6E, 0x9E))
+    }
+    #[inline]
+    pub fn SKETCH() -> u32 {
+        pick(rgb(0xF0, 0x8A, 0x24), rgb(0xF0, 0x8A, 0x24))
+    }
+    #[inline]
+    pub fn SKETCH_SOFT() -> u32 {
+        pick(rgb(0xFD, 0xEB, 0xD8), rgb(0x4A, 0x37, 0x24))
+    }
+    #[inline]
+    pub fn FIELD() -> u32 {
+        pick(rgb(0xFF, 0xFF, 0xFF), rgb(0x22, 0x23, 0x26))
+    }
+    #[inline]
+    pub fn FIELD_BORDER() -> u32 {
+        pick(rgb(0xBF, 0xC5, 0xCE), rgb(0x4C, 0x50, 0x57))
+    }
+    #[inline]
+    pub fn FIELD_BORDER_HOVER() -> u32 {
+        pick(rgb(0x8F, 0x99, 0xA6), rgb(0x6E, 0x73, 0x7C))
+    }
+    #[inline]
+    pub fn DANGER() -> u32 {
+        pick(rgb(0xD9, 0x3B, 0x3B), rgb(0xE5, 0x55, 0x55))
+    }
+    #[inline]
+    pub fn OK() -> u32 {
+        pick(rgb(0x2E, 0x9E, 0x5B), rgb(0x3F, 0xB5, 0x6E))
+    }
+    #[inline]
+    pub fn TIMELINE() -> u32 {
+        pick(rgb(0xEC, 0xEE, 0xF1), rgb(0x26, 0x28, 0x2B))
+    }
+    #[inline]
+    pub fn TIMELINE_ITEM() -> u32 {
+        pick(rgb(0xFF, 0xFF, 0xFF), rgb(0x3A, 0x3D, 0x42))
+    }
+    #[inline]
+    pub fn TIMELINE_ITEM_HOVER() -> u32 {
+        pick(rgb(0xD3, 0xE5, 0xF8), rgb(0x2F, 0x4A, 0x66))
+    }
+    #[inline]
+    pub fn TIMELINE_UNDONE() -> u32 {
+        pick(rgb(0xE2, 0xE5, 0xEA), rgb(0x30, 0x32, 0x36))
+    }
+    #[inline]
+    pub fn TIMELINE_UNDONE_HOVER() -> u32 {
+        pick(rgb(0xE9, 0xED, 0xF2), rgb(0x36, 0x39, 0x3D))
+    }
+    #[inline]
+    pub fn TOOLTIP() -> u32 {
+        pick(rgb(0x30, 0x35, 0x3D), rgb(0x45, 0x48, 0x4E))
+    }
+    #[inline]
+    pub fn DISABLED_VEIL() -> u32 {
+        pick(0x99F5_F6F8, 0x992B_2D30)
+    }
+    #[inline]
+    pub fn INFO_BOX() -> u32 {
+        pick(rgb(0xF5, 0xF6, 0xF8), rgb(0x33, 0x35, 0x39))
+    }
+    #[inline]
+    pub fn LABEL_BG() -> u32 {
+        pick(0xF0FF_FFFF, 0xF033_3539)
+    }
+    #[inline]
+    pub fn SWATCH_BORDER() -> u32 {
+        pick(0x4000_0000, 0x40FF_FFFF)
+    }
+    #[inline]
+    pub fn MODAL_DIM() -> u32 {
+        pick(0x5010_1418, 0x7008_0809)
+    }
 }
 
 /// Контекст кадра интерфейса.
@@ -425,8 +580,8 @@ impl<'a> Ui<'a> {
     pub fn panel(&mut self, r: Rect, radius: f32) {
         self.region(r);
         self.fb.shadow(r, self.px(radius), self.px(6.0), 70);
-        self.fb.fill_rounded(r, self.px(radius), theme::PANEL);
-        self.fb.stroke_rounded(r, self.px(radius), 1.0, theme::BORDER);
+        self.fb.fill_rounded(r, self.px(radius), theme::PANEL());
+        self.fb.stroke_rounded(r, self.px(radius), 1.0, theme::BORDER());
     }
 
     /// Установка подсказки для наведённого элемента.
@@ -459,7 +614,7 @@ impl<'a> Ui<'a> {
         let r = Rect::new(x, y, w, h);
         self.fb.reset_clip();
         self.fb.shadow(r, self.px(4.0), self.px(4.0), 60);
-        self.fb.fill_rounded(r, self.px(4.0), theme::TOOLTIP);
+        self.fb.fill_rounded(r, self.px(4.0), theme::TOOLTIP());
         for (i, l) in lines.iter().enumerate() {
             let c = if i == 0 { 0xFFFF_FFFF } else { 0xFFC8_CED6 };
             self.text(x + self.px(8.0), y + self.px(5.0) + lh * i as f32, l, size, c);

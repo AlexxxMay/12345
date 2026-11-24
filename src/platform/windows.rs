@@ -668,7 +668,7 @@ pub fn run(handler: Box<dyn Handler>, title: &str, width: u32, height: u32) -> R
     enable_dpi_awareness();
     unsafe {
         let hinst = GetModuleHandleW(null());
-        let class = wide("ForgeCADWindow");
+        let class = wide("AlphaCadWindow");
         let mut icon = LoadIconW(hinst, 1 as *const u16);
         if icon.is_null() {
             icon = LoadIconW(null_mut(), IDI_APPLICATION as *const u16);

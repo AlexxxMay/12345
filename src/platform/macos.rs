@@ -1,6 +1,6 @@
 //! macOS: окно через Cocoa (Objective-C runtime), вывод кадра через CoreGraphics.
 //!
-//! Классы `ForgeView`, `ForgeWindowDelegate` и `ForgeAppDelegate` создаются во
+//! Классы `AlphaCadView`, `AlphaCadWindowDelegate` и `AlphaCadAppDelegate` создаются во
 //! время выполнения. Главный цикл — ручной (`nextEventMatchingMask:`), чтобы
 //! перерисовывать окно только при событиях и по таймерам анимаций.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports, unused_macros))]
@@ -602,7 +602,7 @@ unsafe fn add(c: Class, name: &str, imp: *const c_void, types: &str) {
 }
 
 unsafe fn register_classes() -> (Class, Class, Class) {
-    let view = objc_allocateClassPair(cls("NSView"), c"ForgeView".as_ptr(), 0);
+    let view = objc_allocateClassPair(cls("NSView"), c"AlphaCadView".as_ptr(), 0);
     add(view, "drawRect:", view_draw_rect as *const c_void, "v@:{CGRect={CGPoint=dd}{CGSize=dd}}");
     add(view, "isOpaque", yes as *const c_void, "c@:");
     add(view, "acceptsFirstResponder", yes as *const c_void, "c@:");
@@ -629,13 +629,13 @@ unsafe fn register_classes() -> (Class, Class, Class) {
     add(view, "performDragOperation:", perform_drag as *const c_void, "c@:@");
     objc_registerClassPair(view);
 
-    let wd = objc_allocateClassPair(cls("NSObject"), c"ForgeWindowDelegate".as_ptr(), 0);
+    let wd = objc_allocateClassPair(cls("NSObject"), c"AlphaCadWindowDelegate".as_ptr(), 0);
     add(wd, "windowShouldClose:", window_should_close as *const c_void, "c@:@");
     add(wd, "windowDidResize:", window_did_resize as *const c_void, "v@:@");
     add(wd, "windowDidChangeBackingProperties:", window_did_resize as *const c_void, "v@:@");
     objc_registerClassPair(wd);
 
-    let ad = objc_allocateClassPair(cls("NSObject"), c"ForgeAppDelegate".as_ptr(), 0);
+    let ad = objc_allocateClassPair(cls("NSObject"), c"AlphaCadAppDelegate".as_ptr(), 0);
     add(ad, "applicationShouldTerminate:", app_should_terminate as *const c_void, "Q@:@");
     add(ad, "application:openFiles:", app_open_files as *const c_void, "v@:@@");
     objc_registerClassPair(ad);
@@ -648,9 +648,9 @@ unsafe fn build_menu(app: Id) {
     msg!(menubar, "addItem:", app_item => Id; ());
     let app_menu: Id = msg!(msg!(cls("NSMenu"), "alloc"; Id), "init"; Id);
     let ru = super::system_prefers_russian();
-    let about = if ru { "О программе ForgeCAD" } else { "About ForgeCAD" };
-    let hide = if ru { "Скрыть ForgeCAD" } else { "Hide ForgeCAD" };
-    let quit = if ru { "Завершить ForgeCAD" } else { "Quit ForgeCAD" };
+    let about = if ru { "О программе AlphaCad" } else { "About AlphaCad" };
+    let hide = if ru { "Скрыть AlphaCad" } else { "Hide AlphaCad" };
+    let quit = if ru { "Завершить AlphaCad" } else { "Quit AlphaCad" };
     msg!(app_menu, "addItemWithTitle:action:keyEquivalent:", nsstring(about) => Id, sel("orderFrontStandardAboutPanel:") => Sel, nsstring("") => Id; Id);
     let sep: Id = msg!(cls("NSMenuItem"), "separatorItem"; Id);
     msg!(app_menu, "addItem:", sep => Id; ());

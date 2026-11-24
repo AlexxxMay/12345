@@ -49,18 +49,18 @@ impl<'a> Ui<'a> {
         let rad = self.px(4.0);
         let (bg, fg, border) = if primary {
             let bg = if !enabled {
-                theme::TEXT_DISABLED
+                theme::TEXT_DISABLED()
             } else if held {
-                theme::ACCENT_DARK
+                theme::ACCENT_DARK()
             } else if hov {
-                0xFF20_8AE6
+                theme::ACCENT_HOVER()
             } else {
-                theme::ACCENT
+                theme::ACCENT()
             };
             (bg, 0xFFFF_FFFF, bg)
         } else {
-            let bg = if held { theme::PRESSED } else if hov { theme::HOVER } else { theme::FIELD };
-            (bg, if enabled { theme::TEXT } else { theme::TEXT_DISABLED }, theme::FIELD_BORDER)
+            let bg = if held { theme::PRESSED() } else if hov { theme::HOVER() } else { theme::FIELD() };
+            (bg, if enabled { theme::TEXT() } else { theme::TEXT_DISABLED() }, theme::FIELD_BORDER())
         };
         self.fb.fill_rounded(r, rad, bg);
         self.fb.stroke_rounded(r, rad, 1.0, border);
@@ -76,20 +76,20 @@ impl<'a> Ui<'a> {
         let (hov, held, clicked) = if enabled { self.interact(id, r) } else { (false, false, false) };
         let rad = self.px(4.0);
         if active {
-            self.fb.fill_rounded(r, rad, theme::ACCENT_SOFT);
-            self.fb.stroke_rounded(r, rad, 1.0, 0xFF8C_BFEA);
+            self.fb.fill_rounded(r, rad, theme::ACCENT_SOFT());
+            self.fb.stroke_rounded(r, rad, 1.0, theme::FOCUS_RING());
         } else if held {
-            self.fb.fill_rounded(r, rad, theme::PRESSED);
+            self.fb.fill_rounded(r, rad, theme::PRESSED());
         } else if hov {
-            self.fb.fill_rounded(r, rad, theme::HOVER);
+            self.fb.fill_rounded(r, rad, theme::HOVER());
         }
         let pad = (r.w.min(r.h) * 0.16).round();
         let ir = r.shrink(pad);
-        let col = if enabled { theme::TEXT } else { theme::TEXT_DISABLED };
+        let col = if enabled { theme::TEXT() } else { theme::TEXT_DISABLED() };
         self.icon(icon, ir, col);
         if !enabled {
             // Приглушение цветной иконки.
-            self.fb.fill_rect(r, 0x99F5_F6F8);
+            self.fb.fill_rect(r, theme::DISABLED_VEIL());
         }
         if !tooltip.is_empty() {
             self.set_tooltip(id, tooltip);
@@ -105,21 +105,21 @@ impl<'a> Ui<'a> {
         let (hov, held, clicked) = if enabled { self.interact(id, r) } else { (false, false, false) };
         let rad = self.px(4.0);
         if active {
-            self.fb.fill_rounded(r, rad, theme::ACCENT_SOFT);
+            self.fb.fill_rounded(r, rad, theme::ACCENT_SOFT());
         } else if held {
-            self.fb.fill_rounded(r, rad, theme::PRESSED);
+            self.fb.fill_rounded(r, rad, theme::PRESSED());
         } else if hov {
-            self.fb.fill_rounded(r, rad, theme::HOVER);
+            self.fb.fill_rounded(r, rad, theme::HOVER());
         }
         let isz = self.px(30.0);
         let ir = Rect::new(r.x + (r.w - isz) * 0.5, r.y + self.px(3.0), isz, isz);
-        self.icon(icon, ir, if enabled { theme::TEXT } else { theme::TEXT_DISABLED });
+        self.icon(icon, ir, if enabled { theme::TEXT() } else { theme::TEXT_DISABLED() });
         if !label.is_empty() {
             let lr = Rect::new(r.x, ir.bottom(), r.w, r.bottom() - ir.bottom());
-            self.text_in(lr, label, 10.5, if enabled { theme::TEXT } else { theme::TEXT_DISABLED }, 1);
+            self.text_in(lr, label, 10.5, if enabled { theme::TEXT() } else { theme::TEXT_DISABLED() }, 1);
         }
         if !enabled {
-            self.fb.fill_rect(ir, 0x99F5_F6F8);
+            self.fb.fill_rect(ir, theme::DISABLED_VEIL());
         }
         if !tooltip.is_empty() {
             self.set_tooltip(id, tooltip);
@@ -137,7 +137,7 @@ impl<'a> Ui<'a> {
         let b = Rect::new(r.x, r.y + (r.h - bs) * 0.5, bs, bs);
         let rad = self.px(3.0);
         if *v {
-            self.fb.fill_rounded(b, rad, theme::ACCENT);
+            self.fb.fill_rounded(b, rad, theme::ACCENT());
             let s = self.s;
             self.fb.polyline(
                 &[(b.x + 3.5 * s, b.y + 7.5 * s), (b.x + 6.5 * s, b.y + 10.5 * s), (b.x + 11.5 * s, b.y + 4.5 * s)],
@@ -146,11 +146,11 @@ impl<'a> Ui<'a> {
                 false,
             );
         } else {
-            self.fb.fill_rounded(b, rad, if hov { theme::HOVER } else { theme::FIELD });
-            self.fb.stroke_rounded(b, rad, 1.0, theme::FIELD_BORDER);
+            self.fb.fill_rounded(b, rad, if hov { theme::HOVER() } else { theme::FIELD() });
+            self.fb.stroke_rounded(b, rad, 1.0, theme::FIELD_BORDER());
         }
         let lr = Rect::new(b.right() + self.px(7.0), r.y, r.right() - b.right() - self.px(7.0), r.h);
-        self.text_in(lr, label, 12.5, theme::TEXT, 0);
+        self.text_in(lr, label, 12.5, theme::TEXT(), 0);
         if clicked {
             *v = !*v;
         }
@@ -165,21 +165,21 @@ impl<'a> Ui<'a> {
         let n = options.len().max(1);
         let w = r.w / n as f32;
         let rad = self.px(4.0);
-        self.fb.fill_rounded(r, rad, theme::PANEL_HEADER);
-        self.fb.stroke_rounded(r, rad, 1.0, theme::FIELD_BORDER);
+        self.fb.fill_rounded(r, rad, theme::PANEL_HEADER());
+        self.fb.stroke_rounded(r, rad, 1.0, theme::FIELD_BORDER());
         let mut changed = false;
         for (i, o) in options.iter().enumerate() {
             let cr = Rect::new(r.x + w * i as f32, r.y, w, r.h);
             let cid = super::id_idx(id, i);
             let (hov, _, clicked) = self.interact(cid, cr);
             if i == *sel {
-                self.fb.fill_rounded(cr.shrink(self.px(2.0)), rad, theme::ACCENT);
+                self.fb.fill_rounded(cr.shrink(self.px(2.0)), rad, theme::ACCENT());
                 self.text_in(cr.shrink(3.0 * self.s), o, 12.0, 0xFFFF_FFFF, 1);
             } else {
                 if hov {
-                    self.fb.fill_rounded(cr.shrink(self.px(2.0)), rad, theme::HOVER);
+                    self.fb.fill_rounded(cr.shrink(self.px(2.0)), rad, theme::HOVER());
                 }
-                self.text_in(cr.shrink(3.0 * self.s), o, 12.0, theme::TEXT, 1);
+                self.text_in(cr.shrink(3.0 * self.s), o, 12.0, theme::TEXT(), 1);
             }
             if clicked && *sel != i {
                 *sel = i;
@@ -331,8 +331,8 @@ impl<'a> Ui<'a> {
         let focused = self.st.focus == id;
 
         // Рисование.
-        self.fb.fill_rounded(r, rad, theme::FIELD);
-        self.fb.stroke_rounded(r, rad, if focused { 1.6 } else { 1.0 }, if focused { theme::ACCENT } else if hov { 0xFF8F_99A6 } else { theme::FIELD_BORDER });
+        self.fb.fill_rounded(r, rad, theme::FIELD());
+        self.fb.stroke_rounded(r, rad, if focused { 1.6 } else { 1.0 }, if focused { theme::ACCENT() } else if hov { theme::FIELD_BORDER_HOVER() } else { theme::FIELD_BORDER() });
         let pad = self.px(6.0);
         let inner = Rect::new(r.x + pad, r.y, r.w - pad * 2.0, r.h);
         let size = 12.5;
@@ -344,16 +344,16 @@ impl<'a> Ui<'a> {
             self.fb.set_clip(inner.intersect(&old));
             if self.st.edit_select_all && !txt.is_empty() {
                 let tw = self.text_width(&txt, size);
-                self.fb.fill_rect(Rect::new(inner.x, ty, tw, lh), theme::ACCENT_SOFT);
+                self.fb.fill_rect(Rect::new(inner.x, ty, tw, lh), theme::ACCENT_SOFT());
             }
-            self.text(inner.x, ty, &txt, size, theme::TEXT);
+            self.text(inner.x, ty, &txt, size, theme::TEXT());
             let before: String = txt.chars().take(self.st.edit_cursor).collect();
             let cx = inner.x + self.text_width(&before, size);
-            self.fb.fill_rect(Rect::new(cx.round(), ty + 1.0, self.s.max(1.0), lh - 2.0), theme::TEXT);
+            self.fb.fill_rect(Rect::new(cx.round(), ty + 1.0, self.s.max(1.0), lh - 2.0), theme::TEXT());
             self.fb.clip = old;
         } else {
             let label = if unit.is_empty() { shown.to_string() } else { format!("{shown} {unit}") };
-            self.text_in(inner, &label, size, theme::TEXT, 0);
+            self.text_in(inner, &label, size, theme::TEXT(), 0);
         }
         result
     }
@@ -375,13 +375,13 @@ impl<'a> Ui<'a> {
         });
         let (hov, held, clicked) = self.interact(id, r);
         let rad = self.px(3.0);
-        self.fb.fill_rounded(r, rad, if held { theme::PRESSED } else if hov { theme::HOVER } else { theme::FIELD });
-        self.fb.stroke_rounded(r, rad, 1.0, theme::FIELD_BORDER);
+        self.fb.fill_rounded(r, rad, if held { theme::PRESSED() } else if hov { theme::HOVER() } else { theme::FIELD() });
+        self.fb.stroke_rounded(r, rad, 1.0, theme::FIELD_BORDER());
         let pad = self.px(7.0);
         let label = options.get(*sel).cloned().unwrap_or_default();
-        self.text_in(Rect::new(r.x + pad, r.y, r.w - pad * 2.0 - self.px(12.0), r.h), &label, 12.5, theme::TEXT, 0);
+        self.text_in(Rect::new(r.x + pad, r.y, r.w - pad * 2.0 - self.px(12.0), r.h), &label, 12.5, theme::TEXT(), 0);
         let ar = Rect::new(r.right() - self.px(20.0), r.y, self.px(14.0), r.h);
-        self.icon(Icon::ChevronDown, Rect::new(ar.x, r.y + (r.h - self.px(12.0)) * 0.5, self.px(12.0), self.px(12.0)), theme::TEXT_DIM);
+        self.icon(Icon::ChevronDown, Rect::new(ar.x, r.y + (r.h - self.px(12.0)) * 0.5, self.px(12.0), self.px(12.0)), theme::TEXT_DIM());
         if clicked {
             POPUP.with(|p| {
                 let mut p = p.borrow_mut();
@@ -434,9 +434,9 @@ impl<'a> Ui<'a> {
             let iid = super::id_idx(pl.id ^ 0x55, i);
             let (hov, _, clicked) = self.interact(iid, ir);
             if hov || i == pl.selected {
-                self.fb.fill_rounded(ir, self.px(3.0), if hov { theme::HOVER } else { theme::ACCENT_SOFT });
+                self.fb.fill_rounded(ir, self.px(3.0), if hov { theme::HOVER() } else { theme::ACCENT_SOFT() });
             }
-            self.text_in(Rect::new(ir.x + self.px(8.0), ir.y, ir.w - self.px(16.0), ir.h), o, 12.5, theme::TEXT, 0);
+            self.text_in(Rect::new(ir.x + self.px(8.0), ir.y, ir.w - self.px(16.0), ir.h), o, 12.5, theme::TEXT(), 0);
             if clicked {
                 chosen = Some(i);
             }
@@ -465,15 +465,15 @@ impl<'a> Ui<'a> {
     /// Подпись слева от поля: возвращает прямоугольник поля.
     pub fn labeled(&mut self, r: Rect, label: &str, label_w: f32) -> Rect {
         let lw = self.px(label_w);
-        self.text_in(Rect::new(r.x, r.y, lw - self.px(6.0), r.h), label, 12.0, theme::TEXT_DIM, 0);
+        self.text_in(Rect::new(r.x, r.y, lw - self.px(6.0), r.h), label, 12.0, theme::TEXT_DIM(), 0);
         Rect::new(r.x + lw, r.y, r.w - lw, r.h)
     }
 
     /// Заголовок раздела панели.
     pub fn section(&mut self, r: Rect, title: &str) {
-        self.text_in(r, &title.to_uppercase(), 10.5, theme::TEXT_DIM, 0);
+        self.text_in(r, &title.to_uppercase(), 10.5, theme::TEXT_DIM(), 0);
         let y = r.bottom() - 1.0;
-        self.fb.fill_rect(Rect::new(r.x, y, r.w, 1.0), fade(theme::BORDER, 0.7));
+        self.fb.fill_rect(Rect::new(r.x, y, r.w, 1.0), fade(theme::BORDER(), 0.7));
     }
 
     /// Палитра цветов. Возвращает выбранный цвет при клике.
@@ -488,9 +488,9 @@ impl<'a> Ui<'a> {
             self.fb.fill_rounded(cr, self.px(3.0), c | 0xFF00_0000);
             let sel = (c & 0xFF_FFFF) == (current & 0xFF_FFFF);
             if sel {
-                self.fb.stroke_rounded(cr.shrink(-self.px(1.5)), self.px(4.0), self.px(2.0), theme::ACCENT);
+                self.fb.stroke_rounded(cr.shrink(-self.px(1.5)), self.px(4.0), self.px(2.0), theme::ACCENT());
             } else {
-                self.fb.stroke_rounded(cr, self.px(3.0), 1.0, if hov { theme::TEXT_DIM } else { 0x40000000 });
+                self.fb.stroke_rounded(cr, self.px(3.0), 1.0, if hov { theme::TEXT_DIM() } else { theme::SWATCH_BORDER() });
             }
             if clicked {
                 out = Some(c);
@@ -506,9 +506,9 @@ impl<'a> Ui<'a> {
     pub fn menu_item(&mut self, id: u64, r: Rect, icon: Option<Icon>, label: &str, shortcut: &str, enabled: bool) -> bool {
         let (hov, _, clicked) = if enabled { self.interact(id, r) } else { (false, false, false) };
         if hov {
-            self.fb.fill_rounded(r, self.px(3.0), theme::HOVER);
+            self.fb.fill_rounded(r, self.px(3.0), theme::HOVER());
         }
-        let col = if enabled { theme::TEXT } else { theme::TEXT_DISABLED };
+        let col = if enabled { theme::TEXT() } else { theme::TEXT_DISABLED() };
         let isz = self.px(18.0);
         if let Some(ic) = icon {
             self.icon(ic, Rect::new(r.x + self.px(6.0), r.y + (r.h - isz) * 0.5, isz, isz), col);
@@ -516,7 +516,7 @@ impl<'a> Ui<'a> {
         let tx = r.x + self.px(32.0);
         self.text_in(Rect::new(tx, r.y, r.w - self.px(40.0), r.h), label, 12.5, col, 0);
         if !shortcut.is_empty() {
-            self.text_in(Rect::new(r.x, r.y, r.w - self.px(10.0), r.h), shortcut, 11.5, theme::TEXT_DIM, 2);
+            self.text_in(Rect::new(r.x, r.y, r.w - self.px(10.0), r.h), shortcut, 11.5, theme::TEXT_DIM(), 2);
         }
         if hov {
             self.st.cursor = Cursor::Hand;
@@ -527,6 +527,6 @@ impl<'a> Ui<'a> {
     /// Разделитель в меню.
     pub fn menu_separator(&mut self, r: Rect) {
         let y = (r.y + r.h * 0.5).round();
-        self.fb.fill_rect(Rect::new(r.x + self.px(8.0), y, r.w - self.px(16.0), 1.0), theme::TOOLBAR_BORDER);
+        self.fb.fill_rect(Rect::new(r.x + self.px(8.0), y, r.w - self.px(16.0), 1.0), theme::TOOLBAR_BORDER());
     }
 }

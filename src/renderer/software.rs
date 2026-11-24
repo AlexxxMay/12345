@@ -229,7 +229,11 @@ pub struct DisplayMesh {
     pub bounds: Aabb,
     src_positions: Vec<Vec3>,
     src_indices: Vec<u32>,
+    /// Уникальный идентификатор (для кэша буферов GPU); 0 — не кэшировать.
+    pub uid: u64,
 }
+
+static NEXT_MESH_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl DisplayMesh {
     /// Построение из меша. `flat` — плоское затенение; иначе гладкое с изломом `crease_deg`.
@@ -278,7 +282,7 @@ impl DisplayMesh {
             }
         }
 
-        let mut dm = DisplayMesh { closed, bounds: mesh.aabb(), ..Default::default() };
+        let mut dm = DisplayMesh { closed, bounds: mesh.aabb(), uid: NEXT_MESH_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed), ..Default::default() };
         let src_colors = mesh.colors.as_ref().filter(|c| c.len() == pos.len());
 
         if flat {
@@ -595,8 +599,7 @@ pub fn render(fb: &mut Framebuffer, cam: &Camera, items: &[RenderItem], overlay:
     let eye = cam.eye();
     let back = cam.back_dir();
     // Свет: «фара» (слегка сверху-слева от камеры) и заполняющий.
-    let l1 = (back + cam.up() * 0.55 - cam.right() * 0.35).normalize();
-    let l2 = (-back + cam.up() * 0.3 + cam.right() * 0.8).normalize();
+    let (l1, l2) = lights(cam);
     let threads = s.threads.max(1);
 
     // Фон.
@@ -642,18 +645,7 @@ pub fn render(fb: &mut Framebuffer, cam: &Camera, items: &[RenderItem], overlay:
         let mvp = vp * m;
         let dm = it.mesh;
         let mut bins: Vec<Vec<STri>> = (0..n_bands).map(|_| Vec::new()).collect();
-        let base = match it.highlight {
-            Highlight::Selected => {
-                let c = it.color;
-                Color::rgb(
-                    ((c.r as u32 * 3 + sel.r as u32 * 2) / 5) as u8,
-                    ((c.g as u32 * 3 + sel.g as u32 * 2) / 5) as u8,
-                    ((c.b as u32 * 3 + sel.b as u32 * 2) / 5) as u8,
-                )
-            }
-            Highlight::Hover => it.color.lerp(Color::rgb(120, 190, 255), 0.35),
-            Highlight::None => it.color,
-        };
+        let base = base_color(it, sel);
         // Кэш преобразованных вершин в пределах чанка.
         let mut cache: HashMap<u32, ClipVert> = HashMap::with_capacity((job.tri_end - job.tri_start) * 2);
         let mut poly = Vec::with_capacity(6);
@@ -822,28 +814,8 @@ pub fn render(fb: &mut Framebuffer, cam: &Camera, items: &[RenderItem], overlay:
     };
     for it in items {
         let mvp = vp * it.model;
-        let show_edges = it.wire || s.mode == DisplayMode::Wireframe || (s.mode == DisplayMode::ShadedEdges && !s.skip_edges) || it.highlight != Highlight::None;
-        if !show_edges {
-            continue;
-        }
-        let wire = it.wire || s.mode == DisplayMode::Wireframe;
-        let (color, width) = match it.highlight {
-            Highlight::Selected => (0xFF00_7AD9, 1.6 * ls),
-            Highlight::Hover => (0xE04A_A8FF, 1.3 * ls),
-            Highlight::None => {
-                if wire {
-                    (0xC040_4650, 1.0 * ls)
-                } else {
-                    (s.edge_color, 1.0 * ls)
-                }
-            }
-        };
-        let edges: &[[Vec3; 2]] = if wire && !(s.skip_edges && it.mesh.triangle_count() > 50_000) {
-            it.mesh.all_edges()
-        } else {
-            &it.mesh.feature_edges
-        };
-        let color = if it.ghost { super::canvas::fade(color, 0.5) } else { color };
+        let Some((color, width, all)) = edge_style(it, s) else { continue };
+        let edges: &[[Vec3; 2]] = if all { it.mesh.all_edges() } else { &it.mesh.feature_edges };
         for e in edges {
             push_line(&mut lines, &mvp, e[0], e[1], color, width, true);
         }
@@ -928,6 +900,55 @@ pub fn render(fb: &mut Framebuffer, cam: &Camera, items: &[RenderItem], overlay:
     stats.drawn_triangles = drawn.load(std::sync::atomic::Ordering::Relaxed);
     stats.millis = t0.elapsed().as_secs_f32() * 1000.0;
     stats
+}
+
+/// Стиль рёбер объекта: (цвет, толщина в пикселях, все рёбра?) или `None`, если рёбра не рисуются.
+/// Общий для программного и GPU-рендера.
+pub fn edge_style(it: &RenderItem, s: &RenderSettings) -> Option<(u32, f32, bool)> {
+    let ls = s.line_scale;
+    let show_edges = it.wire || s.mode == DisplayMode::Wireframe || (s.mode == DisplayMode::ShadedEdges && !s.skip_edges) || it.highlight != Highlight::None;
+    if !show_edges {
+        return None;
+    }
+    let wire = it.wire || s.mode == DisplayMode::Wireframe;
+    let (color, width) = match it.highlight {
+        Highlight::Selected => (0xFF00_7AD9, 1.6 * ls),
+        Highlight::Hover => (0xE04A_A8FF, 1.3 * ls),
+        Highlight::None => {
+            if wire {
+                (0xC040_4650, 1.0 * ls)
+            } else {
+                (s.edge_color, 1.0 * ls)
+            }
+        }
+    };
+    let all = wire && !(s.skip_edges && it.mesh.triangle_count() > 50_000);
+    let color = if it.ghost { super::canvas::fade(color, 0.5) } else { color };
+    Some((color, width, all))
+}
+
+/// Базовый цвет объекта с учётом подсветки.
+pub fn base_color(it: &RenderItem, sel: Color) -> Color {
+    match it.highlight {
+        Highlight::Selected => {
+            let c = it.color;
+            Color::rgb(
+                ((c.r as u32 * 3 + sel.r as u32 * 2) / 5) as u8,
+                ((c.g as u32 * 3 + sel.g as u32 * 2) / 5) as u8,
+                ((c.b as u32 * 3 + sel.b as u32 * 2) / 5) as u8,
+            )
+        }
+        Highlight::Hover => it.color.lerp(Color::rgb(120, 190, 255), 0.35),
+        Highlight::None => it.color,
+    }
+}
+
+/// Направления двух источников света для камеры.
+pub fn lights(cam: &Camera) -> (Vec3, Vec3) {
+    let back = cam.back_dir();
+    let l1 = (back + cam.up() * 0.55 - cam.right() * 0.35).normalize();
+    let l2 = (-back + cam.up() * 0.3 + cam.right() * 0.8).normalize();
+    (l1, l2)
 }
 
 #[inline]
@@ -1067,7 +1088,7 @@ fn raster_line(l: &SLine, color: &mut [u32], depth: &[f32], w: usize, y0: usize,
 }
 
 /// Линии координатной сетки на плоскости XY вокруг цели камеры.
-pub fn grid_lines(cam: &Camera, out: &mut Vec<Line3>) -> f32 {
+pub fn grid_lines(cam: &Camera, out: &mut Vec<Line3>, dark_bg: bool) -> f32 {
     let target = cam.target;
     let extent = cam.distance * 2.5;
     let raw = cam.distance / 12.0;
@@ -1096,7 +1117,7 @@ pub fn grid_lines(cam: &Camera, out: &mut Vec<Line3>) -> f32 {
         if a < 3 {
             continue;
         }
-        let col = super::canvas::argb(a, 60, 70, 85);
+        let col = if dark_bg { super::canvas::argb(a.saturating_add(a / 3), 170, 178, 190) } else { super::canvas::argb(a, 60, 70, 85) };
         if x.abs() > step * 0.01 {
             out.push(Line3 { a: Vec3::new(x, cy - half, 0.0), b: Vec3::new(x, cy + half, 0.0), color: col, width: 1.0, depth_test: true });
         }

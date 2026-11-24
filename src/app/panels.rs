@@ -36,19 +36,15 @@ impl State {
     pub(super) fn draw_appbar(&mut self, ui: &mut Ui) {
         let r = self.layout.appbar;
         ui.region(r);
-        ui.fb.fill_rect(r, theme::APPBAR);
+        ui.fb.fill_rect(r, theme::APPBAR());
         let s = ui.s;
         // Логотип.
         let lx = r.x + 10.0 * s;
-        let ly = r.y + (r.h - 22.0 * s) * 0.5;
-        let lr = Rect::new(lx, ly, 22.0 * s, 22.0 * s);
-        ui.fb.fill_rounded(lr, 5.0 * s, 0xFFF0_8A24);
-        ui.fb.fill_polygon(
-            &[(lx + 6.0 * s, ly + 5.0 * s), (lx + 17.0 * s, ly + 5.0 * s), (lx + 17.0 * s, ly + 8.5 * s), (lx + 10.0 * s, ly + 8.5 * s), (lx + 10.0 * s, ly + 10.5 * s), (lx + 15.0 * s, ly + 10.5 * s), (lx + 15.0 * s, ly + 14.0 * s), (lx + 10.0 * s, ly + 14.0 * s), (lx + 10.0 * s, ly + 18.0 * s), (lx + 6.0 * s, ly + 18.0 * s)],
-            0xFFFF_FFFF,
-        );
-        ui.text(lr.right() + 8.0 * s, r.y + (r.h - 17.0 * s) * 0.5, "ForgeCAD", 13.5, theme::APPBAR_TEXT);
-        let mut x = lr.right() + 8.0 * s + ui.text_width("ForgeCAD", 13.5) + 18.0 * s;
+        let ly = r.y + (r.h - 24.0 * s) * 0.5;
+        let lr = Rect::new(lx, ly, 24.0 * s, 24.0 * s);
+        crate::ui::icons::draw_logo(ui.fb, lr);
+        ui.text(lr.right() + 8.0 * s, r.y + (r.h - 17.0 * s) * 0.5, "AlphaCad", 13.5, theme::APPBAR_TEXT());
+        let mut x = lr.right() + 8.0 * s + ui.text_width("AlphaCad", 13.5) + 18.0 * s;
 
         // Кнопка «Файл».
         let fl = t("Файл", "File");
@@ -58,10 +54,10 @@ impl State {
         let (hov, _, clicked) = ui.interact(fid, fr);
         let open = self.menu.as_ref().map(|m| m.opener == fr).unwrap_or(false);
         if hov || open {
-            ui.fb.fill_rounded(fr, 4.0 * s, theme::APPBAR_HOVER);
+            ui.fb.fill_rounded(fr, 4.0 * s, theme::APPBAR_HOVER());
         }
-        ui.text_in(Rect::new(fr.x + 10.0 * s, fr.y, fr.w, fr.h), fl, 12.5, theme::APPBAR_TEXT, 0);
-        ui.icon(Icon::ChevronDown, Rect::new(fr.right() - 18.0 * s, fr.y + (fr.h - 10.0 * s) * 0.5, 10.0 * s, 10.0 * s), theme::APPBAR_TEXT);
+        ui.text_in(Rect::new(fr.x + 10.0 * s, fr.y, fr.w, fr.h), fl, 12.5, theme::APPBAR_TEXT(), 0);
+        ui.icon(Icon::ChevronDown, Rect::new(fr.right() - 18.0 * s, fr.y + (fr.h - 10.0 * s) * 0.5, 10.0 * s, 10.0 * s), theme::APPBAR_TEXT());
         if clicked {
             self.toggle_menu(fr, self.file_menu_items());
         }
@@ -80,9 +76,9 @@ impl State {
             let id = id_idx(id_of("appbar_q"), i);
             let (hov, _, clicked) = if en { ui.interact(id, br) } else { (false, false, false) };
             if hov {
-                ui.fb.fill_rounded(br, 4.0 * s, theme::APPBAR_HOVER);
+                ui.fb.fill_rounded(br, 4.0 * s, theme::APPBAR_HOVER());
             }
-            let col = if en { theme::APPBAR_TEXT } else { 0xFF6B_7380 };
+            let col = if en { theme::APPBAR_TEXT() } else { theme::APPBAR_DIM() };
             let ic_r = br.shrink(5.0 * s);
             match ic {
                 Icon::Undo | Icon::Redo => ui.icon(ic, ic_r, col),
@@ -107,9 +103,9 @@ impl State {
         let title = if self.is_dirty() { format!("{title} •") } else { title };
         let tw = ui.text_width(&title, 12.5) + 40.0 * s;
         let tr = Rect::new(((r.w - tw) * 0.5).max(x + 10.0 * s), r.y + 6.0 * s, tw, r.h - 6.0 * s);
-        ui.fb.fill_rounded(Rect::new(tr.x, tr.y, tr.w, tr.h + 6.0 * s), 6.0 * s, theme::TOOLBAR);
-        ui.icon(Icon::Body, Rect::new(tr.x + 9.0 * s, tr.y + (tr.h - 15.0 * s) * 0.5, 15.0 * s, 15.0 * s), theme::TEXT);
-        ui.text_in(Rect::new(tr.x + 28.0 * s, tr.y, tr.w - 32.0 * s, tr.h), &title, 12.5, theme::TEXT, 0);
+        ui.fb.fill_rounded(Rect::new(tr.x, tr.y, tr.w, tr.h + 6.0 * s), 6.0 * s, theme::TOOLBAR());
+        ui.icon(Icon::Body, Rect::new(tr.x + 9.0 * s, tr.y + (tr.h - 15.0 * s) * 0.5, 15.0 * s, 15.0 * s), theme::TEXT());
+        ui.text_in(Rect::new(tr.x + 28.0 * s, tr.y, tr.w - 32.0 * s, tr.h), &title, 12.5, theme::TEXT(), 0);
 
         // Справа: язык, настройки, справка.
         let mut rx = r.right() - 8.0 * s;
@@ -123,16 +119,16 @@ impl State {
             let id = id_idx(id_of("appbar_r"), i);
             let (hov, _, clicked) = ui.interact(id, br);
             if hov {
-                ui.fb.fill_rounded(br, 4.0 * s, theme::APPBAR_HOVER);
+                ui.fb.fill_rounded(br, 4.0 * s, theme::APPBAR_HOVER());
             }
             if ic == Icon::Settings {
                 // Светлая шестерёнка на тёмном фоне.
                 let ir = br.shrink(6.0 * s);
-                ui.icon(ic, ir, theme::APPBAR_TEXT);
+                ui.icon(ic, ir, theme::APPBAR_TEXT());
                 let (cx, cy) = ir.center();
-                ui.fb.fill_circle(cx, cy, ir.w * 0.12, theme::APPBAR);
+                ui.fb.fill_circle(cx, cy, ir.w * 0.12, theme::APPBAR());
             } else {
-                ui.icon(ic, br.shrink(6.0 * s), theme::APPBAR_TEXT);
+                ui.icon(ic, br.shrink(6.0 * s), theme::APPBAR_TEXT());
             }
             ui.set_tooltip(id, tip);
             if clicked {
@@ -146,8 +142,8 @@ impl State {
         let lrr = Rect::new(rx, r.y + 7.0 * s, lw, r.h - 14.0 * s);
         let lid = id_of("appbar_lang");
         let (hov, _, clicked) = ui.interact(lid, lrr);
-        ui.fb.stroke_rounded(lrr, 4.0 * s, 1.0, if hov { theme::APPBAR_TEXT } else { 0xFF5A_626E });
-        ui.text_in(lrr, lang, 11.5, theme::APPBAR_TEXT, 1);
+        ui.fb.stroke_rounded(lrr, 4.0 * s, 1.0, if hov { theme::APPBAR_TEXT() } else { theme::APPBAR_BORDER() });
+        ui.text_in(lrr, lang, 11.5, theme::APPBAR_TEXT(), 1);
         ui.set_tooltip(lid, "Язык интерфейса / Interface language");
         if clicked {
             self.run_action(Action::ToggleLang);
@@ -158,6 +154,7 @@ impl State {
         let has = !self.scene.bodies.is_empty();
         let mut v = vec![
             MenuItem::new(Some(Icon::New), t("Новый проект", "New project"), "Ctrl+N", Action::New),
+            MenuItem::new(None, t("Новое окно", "New window"), "Ctrl+Shift+N", Action::NewWindow),
             MenuItem::new(Some(Icon::Open), t("Открыть…", "Open…"), "Ctrl+O", Action::Open),
             MenuItem::new(Some(Icon::Import), t("Импорт в проект…", "Import into project…"), "Ctrl+I", Action::Import),
             MenuItem::sep(),
@@ -167,6 +164,7 @@ impl State {
             MenuItem::new(Some(Icon::Export), t("Экспорт STL (двоичный)…", "Export STL (binary)…"), "Ctrl+E", Action::Export(ExportKind::StlBinary)).enabled(has),
             MenuItem::new(None, t("Экспорт STL (ASCII)…", "Export STL (ASCII)…"), "", Action::Export(ExportKind::StlAscii)).enabled(has),
             MenuItem::new(None, t("Экспорт STEP…", "Export STEP…"), "", Action::Export(ExportKind::Step)).enabled(has),
+            MenuItem::new(None, t("Экспорт 3MF…", "Export 3MF…"), "", Action::Export(ExportKind::ThreeMf)).enabled(has),
             MenuItem::new(None, t("Экспорт OBJ…", "Export OBJ…"), "", Action::Export(ExportKind::Obj)).enabled(has),
             MenuItem::new(None, t("Экспорт PLY…", "Export PLY…"), "", Action::Export(ExportKind::Ply)).enabled(has),
             MenuItem::new(Some(Icon::Camera), t("Снимок вида (PNG)…", "Capture image (PNG)…"), "", Action::Screenshot),
@@ -248,7 +246,7 @@ impl State {
                 ),
                 (
                     t("ВСТАВИТЬ", "INSERT"),
-                    vec![td(Icon::Import, t("Вставить модель", "Insert mesh"), t("Импорт STL/STEP/OBJ/PLY в текущий проект", "Import STL/STEP/OBJ/PLY into project"), "Ctrl+I", Action::Import)],
+                    vec![td(Icon::Import, t("Вставить модель", "Insert mesh"), t("Импорт STL/STEP/3MF/OBJ/PLY в текущий проект", "Import STL/STEP/3MF/OBJ/PLY into project"), "Ctrl+I", Action::Import)],
                     vec![],
                 ),
                 (
@@ -344,16 +342,16 @@ impl State {
         let r = self.layout.toolbar;
         ui.region(r);
         let s = ui.s;
-        ui.fb.fill_rect(r, theme::TOOLBAR);
-        ui.fb.fill_rect(Rect::new(r.x, r.bottom() - 1.0, r.w, 1.0), theme::TOOLBAR_BORDER);
+        ui.fb.fill_rect(r, theme::TOOLBAR());
+        ui.fb.fill_rect(Rect::new(r.x, r.bottom() - 1.0, r.w, 1.0), theme::TOOLBAR_BORDER());
 
         // Переключатель рабочего пространства.
         let ws = Rect::new(r.x + 10.0 * s, r.y + 10.0 * s, 104.0 * s, r.h - 20.0 * s);
-        ui.fb.fill_rounded(ws, 5.0 * s, theme::PANEL_SOLID);
-        ui.fb.stroke_rounded(ws, 5.0 * s, 1.0, theme::TOOLBAR_BORDER);
-        ui.text_in(Rect::new(ws.x, ws.y + 6.0 * s, ws.w, 16.0 * s), t("РАБОЧЕЕ", "WORKSPACE"), 9.5, theme::TEXT_DIM, 1);
-        ui.text_in(Rect::new(ws.x, ws.y + 22.0 * s, ws.w, 22.0 * s), t("ДИЗАЙН", "DESIGN"), 14.0, theme::ACCENT, 1);
-        ui.text_in(Rect::new(ws.x, ws.bottom() - 22.0 * s, ws.w, 16.0 * s), t("мм · Z вверх", "mm · Z up"), 10.0, theme::TEXT_DIM, 1);
+        ui.fb.fill_rounded(ws, 5.0 * s, theme::PANEL_SOLID());
+        ui.fb.stroke_rounded(ws, 5.0 * s, 1.0, theme::TOOLBAR_BORDER());
+        ui.text_in(Rect::new(ws.x, ws.y + 6.0 * s, ws.w, 16.0 * s), t("РАБОЧЕЕ", "WORKSPACE"), 9.5, theme::TEXT_DIM(), 1);
+        ui.text_in(Rect::new(ws.x, ws.y + 22.0 * s, ws.w, 22.0 * s), t("ДИЗАЙН", "DESIGN"), 14.0, theme::ACCENT(), 1);
+        ui.text_in(Rect::new(ws.x, ws.bottom() - 22.0 * s, ws.w, 16.0 * s), t("мм · Z вверх", "mm · Z up"), 10.0, theme::TEXT_DIM(), 1);
 
         // Вкладки.
         let tabs = [
@@ -372,14 +370,14 @@ impl State {
             let active = self.tab == *tab;
             let col = if active {
                 if *tab == Tab::Sketch && self.sketch.is_some() {
-                    theme::SKETCH
+                    theme::SKETCH()
                 } else {
-                    theme::ACCENT
+                    theme::ACCENT()
                 }
             } else if hov {
-                theme::TEXT
+                theme::TEXT()
             } else {
-                theme::TEXT_DIM
+                theme::TEXT_DIM()
             };
             ui.text_in(tr, name, 11.5, col, 1);
             if active {
@@ -390,7 +388,7 @@ impl State {
             }
             x += tw + 2.0 * s;
         }
-        ui.fb.fill_rect(Rect::new(ws.right() + 14.0 * s, r.y + tab_h + 3.0 * s, r.w, 1.0), fade(theme::TOOLBAR_BORDER, 0.6));
+        ui.fb.fill_rect(Rect::new(ws.right() + 14.0 * s, r.y + tab_h + 3.0 * s, r.w, 1.0), fade(theme::TOOLBAR_BORDER(), 0.6));
 
         // Группы инструментов.
         let groups = self.tool_groups();
@@ -422,10 +420,10 @@ impl State {
             let lid = id_idx(id_of("group_label"), gi);
             let (hov, _, clicked) = ui.interact(lid, lr);
             if hov {
-                ui.fb.fill_rounded(lr, 3.0 * s, theme::HOVER);
+                ui.fb.fill_rounded(lr, 3.0 * s, theme::HOVER());
             }
             let label = format!("{gname} ▾");
-            ui.text_in(lr, &label, 10.0, if hov { theme::ACCENT } else { theme::TEXT_DIM }, 1);
+            ui.text_in(lr, &label, 10.0, if hov { theme::ACCENT() } else { theme::TEXT_DIM() }, 1);
             if clicked {
                 let mut items: Vec<MenuItem> = tools
                     .iter()
@@ -439,7 +437,7 @@ impl State {
             }
             // Разделитель.
             gx += 8.0 * s;
-            ui.fb.fill_rect(Rect::new(gx - 5.0 * s, by + 2.0 * s, 1.0, bs + 14.0 * s), theme::TOOLBAR_BORDER);
+            ui.fb.fill_rect(Rect::new(gx - 5.0 * s, by + 2.0 * s, 1.0, bs + 14.0 * s), theme::TOOLBAR_BORDER());
         }
         if let Some(a) = fire {
             self.run_action(a);
@@ -458,10 +456,10 @@ impl State {
         let id = id_of("browser_expand");
         let (hov, _, clicked) = ui.interact(id, r);
         if hov {
-            ui.fb.fill_rounded(r.shrink(2.0), 5.0 * s, theme::HOVER);
+            ui.fb.fill_rounded(r.shrink(2.0), 5.0 * s, theme::HOVER());
         }
-        ui.icon(Icon::ChevronRight, Rect::new(r.x + 8.0 * s, r.y + 8.0 * s, 14.0 * s, 14.0 * s), theme::TEXT_DIM);
-        ui.text_in(Rect::new(r.x + 28.0 * s, r.y, r.w - 30.0 * s, r.h), t("БРАУЗЕР", "BROWSER"), 11.0, theme::TEXT, 0);
+        ui.icon(Icon::ChevronRight, Rect::new(r.x + 8.0 * s, r.y + 8.0 * s, 14.0 * s, 14.0 * s), theme::TEXT_DIM());
+        ui.text_in(Rect::new(r.x + 28.0 * s, r.y, r.w - 30.0 * s, r.h), t("БРАУЗЕР", "BROWSER"), 11.0, theme::TEXT(), 0);
         if clicked {
             self.browser_open = true;
         }
@@ -482,14 +480,14 @@ impl State {
         let id = id_of("browser_collapse");
         let (hov, _, clicked) = ui.interact(id, Rect::new(hr.x, hr.y, 30.0 * s, hr.h));
         if hov {
-            ui.fb.fill_rounded(Rect::new(hr.x + 3.0 * s, hr.y + 3.0 * s, 24.0 * s, 24.0 * s), 4.0 * s, theme::HOVER);
+            ui.fb.fill_rounded(Rect::new(hr.x + 3.0 * s, hr.y + 3.0 * s, 24.0 * s, 24.0 * s), 4.0 * s, theme::HOVER());
         }
-        ui.icon(Icon::ChevronDown, Rect::new(hr.x + 8.0 * s, hr.y + 8.0 * s, 14.0 * s, 14.0 * s), theme::TEXT_DIM);
-        ui.text_in(Rect::new(hr.x + 30.0 * s, hr.y, hr.w - 40.0 * s, hr.h), t("БРАУЗЕР", "BROWSER"), 11.0, theme::TEXT, 0);
+        ui.icon(Icon::ChevronDown, Rect::new(hr.x + 8.0 * s, hr.y + 8.0 * s, 14.0 * s, 14.0 * s), theme::TEXT_DIM());
+        ui.text_in(Rect::new(hr.x + 30.0 * s, hr.y, hr.w - 40.0 * s, hr.h), t("БРАУЗЕР", "BROWSER"), 11.0, theme::TEXT(), 0);
         if clicked {
             self.browser_open = false;
         }
-        ui.fb.fill_rect(Rect::new(r.x + 1.0, hr.bottom(), r.w - 2.0, 1.0), theme::TOOLBAR_BORDER);
+        ui.fb.fill_rect(Rect::new(r.x + 1.0, hr.bottom(), r.w - 2.0, 1.0), theme::TOOLBAR_BORDER());
 
         let list = Rect::new(r.x + 4.0 * s, hr.bottom() + 4.0 * s, r.w - 8.0 * s, r.bottom() - hr.bottom() - 8.0 * s);
         let sid = id_of("browser_scroll");
@@ -573,9 +571,9 @@ impl State {
     fn tree_header(&mut self, ui: &mut Ui, r: Rect, depth: usize, icon: Icon, label: &str) {
         let s = ui.s;
         let x = r.x + depth as f32 * 14.0 * s;
-        ui.icon(Icon::ChevronDown, Rect::new(x + 2.0 * s, r.y + 7.0 * s, 10.0 * s, 10.0 * s), theme::TEXT_DIM);
-        ui.icon(icon, Rect::new(x + 15.0 * s, r.y + 3.0 * s, 18.0 * s, 18.0 * s), theme::TEXT);
-        ui.text_in(Rect::new(x + 38.0 * s, r.y, r.right() - x - 40.0 * s, r.h), label, 12.0, theme::TEXT, 0);
+        ui.icon(Icon::ChevronDown, Rect::new(x + 2.0 * s, r.y + 7.0 * s, 10.0 * s, 10.0 * s), theme::TEXT_DIM());
+        ui.icon(icon, Rect::new(x + 15.0 * s, r.y + 3.0 * s, 18.0 * s, 18.0 * s), theme::TEXT());
+        ui.text_in(Rect::new(x + 38.0 * s, r.y, r.right() - x - 40.0 * s, r.h), label, 12.0, theme::TEXT(), 0);
     }
 
     /// Строка тела: 0 — выбор, 1 — видимость, 2 — переименование, 3 — контекстное меню, 4 — двойной щелчок.
@@ -592,21 +590,21 @@ impl State {
         let selected = self.scene.selected == Some(bid);
         let hov = ui.hovered(vis_r);
         if selected {
-            ui.fb.fill_rounded(r, 4.0 * s, theme::ACCENT_SOFT);
+            ui.fb.fill_rounded(r, 4.0 * s, theme::ACCENT_SOFT());
         } else if hov {
-            ui.fb.fill_rounded(r, 4.0 * s, theme::HOVER);
+            ui.fb.fill_rounded(r, 4.0 * s, theme::HOVER());
         }
         // Глаз.
         let er = Rect::new(x, r.y + 3.0 * s, 18.0 * s, 18.0 * s);
         let eid = id_idx(id_of("tree_eye"), bid as usize);
         let (eh, _, eclick) = ui.interact(eid, er.intersect(&clip));
-        ui.icon(if visible { Icon::Eye } else { Icon::EyeOff }, er.shrink(1.0 * s), if eh { theme::ACCENT } else if visible { theme::TEXT_DIM } else { theme::TEXT_DISABLED });
+        ui.icon(if visible { Icon::Eye } else { Icon::EyeOff }, er.shrink(1.0 * s), if eh { theme::ACCENT() } else if visible { theme::TEXT_DIM() } else { theme::TEXT_DISABLED() });
         ui.set_tooltip(eid, t("Показать / скрыть", "Show / hide"));
         if eclick {
             return Some(1);
         }
         let ir = Rect::new(x + 22.0 * s, r.y + 3.0 * s, 18.0 * s, 18.0 * s);
-        ui.icon(if is_sketch { Icon::SketchItem } else { Icon::Body }, ir, theme::TEXT);
+        ui.icon(if is_sketch { Icon::SketchItem } else { Icon::Body }, ir, theme::TEXT());
         let tr = Rect::new(ir.right() + 6.0 * s, r.y, r.right() - ir.right() - 8.0 * s, r.h);
         // Переименование на месте.
         if let Some((rid, buf)) = &self.rename {
@@ -632,7 +630,7 @@ impl State {
                 return None;
             }
         }
-        ui.text_in(tr, &name, 12.0, if visible { theme::TEXT } else { theme::TEXT_DISABLED }, 0);
+        ui.text_in(tr, &name, 12.0, if visible { theme::TEXT() } else { theme::TEXT_DISABLED() }, 0);
         let (_, _, clicked) = ui.interact(id, vis_r);
         if hov && ui.input.pressed[1] {
             return Some(3);
@@ -699,8 +697,8 @@ impl State {
 
         // Заголовок.
         let hr = Rect::new(r.x, r.y, r.w, 36.0 * s);
-        ui.fb.fill_rounded(Rect::new(hr.x + 1.0, hr.y + 1.0, hr.w - 2.0, hr.h), 6.0 * s, theme::PANEL_HEADER);
-        ui.icon(if is_sketch { Icon::SketchItem } else { Icon::Body }, Rect::new(hr.x + 10.0 * s, hr.y + 9.0 * s, 18.0 * s, 18.0 * s), theme::TEXT);
+        ui.fb.fill_rounded(Rect::new(hr.x + 1.0, hr.y + 1.0, hr.w - 2.0, hr.h), 6.0 * s, theme::PANEL_HEADER());
+        ui.icon(if is_sketch { Icon::SketchItem } else { Icon::Body }, Rect::new(hr.x + 10.0 * s, hr.y + 9.0 * s, 18.0 * s, 18.0 * s), theme::TEXT());
         let mut name = body.name.clone();
         if ui.text_field(id_of("prop_name"), Rect::new(hr.x + 34.0 * s, hr.y + 6.0 * s, hr.w - 72.0 * s, 24.0 * s), &mut name) {
             let nm = name.trim().to_string();
@@ -720,13 +718,13 @@ impl State {
             ui.section(Rect::new(x0, y, w0, 20.0 * s), t("Эскиз", "Sketch"));
             y += row;
             let fr = ui.labeled(Rect::new(x0, y, w0, 24.0 * s), t("Плоскость", "Plane"), 110.0);
-            ui.text_in(fr, sk.plane.name(), 12.5, theme::TEXT, 0);
+            ui.text_in(fr, sk.plane.name(), 12.5, theme::TEXT(), 0);
             y += row;
             let fr = ui.labeled(Rect::new(x0, y, w0, 24.0 * s), t("Элементов", "Entities"), 110.0);
-            ui.text_in(fr, &sk.entities.len().to_string(), 12.5, theme::TEXT, 0);
+            ui.text_in(fr, &sk.entities.len().to_string(), 12.5, theme::TEXT(), 0);
             y += row;
             let fr = ui.labeled(Rect::new(x0, y, w0, 24.0 * s), t("Профилей", "Profiles"), 110.0);
-            ui.text_in(fr, &sk.profiles().len().to_string(), 12.5, theme::TEXT, 0);
+            ui.text_in(fr, &sk.profiles().len().to_string(), 12.5, theme::TEXT(), 0);
             y += row + 4.0 * s;
             let bw = (w0 - 8.0 * s) * 0.5;
             if ui.button(id_of("prop_edit_sketch"), Rect::new(x0, y, bw, 26.0 * s), t("Редактировать", "Edit"), false) {
@@ -824,7 +822,7 @@ impl State {
         ];
         for (k, v) in rows.iter() {
             let fr = ui.labeled(Rect::new(x0, y, w0, 22.0 * s), k, 110.0);
-            let col = if *k == t("Замкнутость", "Watertight") && !info.closed { theme::DANGER } else { theme::TEXT };
+            let col = if *k == t("Замкнутость", "Watertight") && !info.closed { theme::DANGER() } else { theme::TEXT() };
             ui.text_in(fr, v, 12.0, col, 0);
             y += 22.0 * s;
         }
@@ -841,10 +839,10 @@ impl State {
         let r = Rect::new(area.x, area.y, area.w, 232.0 * s);
         ui.panel(r, 6.0);
         let hr = Rect::new(r.x, r.y, r.w, 34.0 * s);
-        ui.fb.fill_rounded(Rect::new(hr.x + 1.0, hr.y + 1.0, hr.w - 2.0, hr.h), 6.0 * s, 0xFFFD_EBD8);
-        ui.icon(Icon::Sketch, Rect::new(hr.x + 10.0 * s, hr.y + 8.0 * s, 18.0 * s, 18.0 * s), theme::TEXT);
+        ui.fb.fill_rounded(Rect::new(hr.x + 1.0, hr.y + 1.0, hr.w - 2.0, hr.h), 6.0 * s, theme::SKETCH_SOFT());
+        ui.icon(Icon::Sketch, Rect::new(hr.x + 10.0 * s, hr.y + 8.0 * s, 18.0 * s, 18.0 * s), theme::TEXT());
         let name = self.sketch.as_ref().map(|s| s.sketch.name.clone()).unwrap_or_default();
-        ui.text_in(Rect::new(hr.x + 34.0 * s, hr.y, hr.w - 40.0 * s, hr.h), &name, 13.0, theme::TEXT, 0);
+        ui.text_in(Rect::new(hr.x + 34.0 * s, hr.y, hr.w - 40.0 * s, hr.h), &name, 13.0, theme::TEXT(), 0);
         let x0 = r.x + 12.0 * s;
         let w0 = r.w - 24.0 * s;
         let mut y = hr.bottom() + 8.0 * s;
@@ -863,7 +861,7 @@ impl State {
         }
         y += 42.0 * s;
         let (n_ent, n_prof) = self.sketch.as_ref().map(|s| (s.sketch.entities.len(), s.sketch.profiles().len())).unwrap_or((0, 0));
-        ui.text_in(Rect::new(x0, y, w0, 20.0 * s), &format!("{}: {}   {}: {}", t("Элементов", "Entities"), n_ent, t("Замкнутых профилей", "Closed profiles"), n_prof), 12.0, theme::TEXT_DIM, 0);
+        ui.text_in(Rect::new(x0, y, w0, 20.0 * s), &format!("{}: {}   {}: {}", t("Элементов", "Entities"), n_ent, t("Замкнутых профилей", "Closed profiles"), n_prof), 12.0, theme::TEXT_DIM(), 0);
         y += 24.0 * s;
         let mut snap = self.cfg.snap;
         if ui.checkbox(id_of("sk_snap"), Rect::new(x0, y, w0, 22.0 * s), t("Привязка к сетке (Shift — отключить)", "Grid snap (hold Shift to disable)"), &mut snap) {
@@ -891,8 +889,8 @@ impl State {
         let r = self.layout.timeline;
         ui.region(r);
         let s = ui.s;
-        ui.fb.fill_rect(r, theme::TIMELINE);
-        ui.fb.fill_rect(Rect::new(r.x, r.y, r.w, 1.0), theme::TOOLBAR_BORDER);
+        ui.fb.fill_rect(r, theme::TIMELINE());
+        ui.fb.fill_rect(Rect::new(r.x, r.y, r.w, 1.0), theme::TOOLBAR_BORDER());
         let bs = 26.0 * s;
         let by = r.y + (r.h - bs) * 0.5;
         let mut x = r.x + 8.0 * s;
@@ -916,7 +914,7 @@ impl State {
             x += bs + 2.0 * s;
         }
         x += 8.0 * s;
-        ui.fb.fill_rect(Rect::new(x - 5.0 * s, by + 3.0 * s, 1.0, bs - 6.0 * s), theme::TOOLBAR_BORDER);
+        ui.fb.fill_rect(Rect::new(x - 5.0 * s, by + 3.0 * s, 1.0, bs - 6.0 * s), theme::TOOLBAR_BORDER());
 
         // Элементы истории.
         let status_w = 340.0 * s;
@@ -932,12 +930,12 @@ impl State {
             let (icon, label) = command_icon(cmd);
             let id = id_idx(id_of("tl_item"), i);
             let (hov, _, clicked) = ui.interact(id, er);
-            let bg = if *done { if hov { 0xFFD3_E5F8 } else { 0xFFFF_FFFF } } else if hov { 0xFFE9_EDF2 } else { 0xFFE2_E5EA };
+            let bg = if *done { if hov { theme::TIMELINE_ITEM_HOVER() } else { theme::TIMELINE_ITEM() } } else if hov { theme::TIMELINE_UNDONE_HOVER() } else { theme::TIMELINE_UNDONE() };
             ui.fb.fill_rounded(er, 3.0 * s, bg);
-            ui.fb.stroke_rounded(er, 3.0 * s, 1.0, if *done { theme::BORDER } else { theme::TOOLBAR_BORDER });
-            ui.icon(icon, er.shrink(3.0 * s), theme::TEXT);
+            ui.fb.stroke_rounded(er, 3.0 * s, 1.0, if *done { theme::BORDER() } else { theme::TOOLBAR_BORDER() });
+            ui.icon(icon, er.shrink(3.0 * s), theme::TEXT());
             if !*done {
-                ui.fb.fill_rounded(er, 3.0 * s, 0x80E2_E5EA);
+                ui.fb.fill_rounded(er, 3.0 * s, (theme::TIMELINE_UNDONE() & 0x00FF_FFFF) | 0x8000_0000);
             }
             ui.set_tooltip(id, &format!("{}. {}", i + 1, label));
             if clicked {
@@ -946,8 +944,8 @@ impl State {
             x += ew + 2.0 * s;
             if i + 1 == nu {
                 // Маркер текущего положения.
-                ui.fb.fill_rect(Rect::new(x - 1.0 * s, r.y + 4.0 * s, 2.5 * s, r.h - 8.0 * s), theme::ACCENT);
-                ui.fb.fill_polygon(&[(x - 5.0 * s, r.y + 3.0 * s), (x + 5.5 * s, r.y + 3.0 * s), (x + 0.25 * s, r.y + 9.0 * s)], theme::ACCENT);
+                ui.fb.fill_rect(Rect::new(x - 1.0 * s, r.y + 4.0 * s, 2.5 * s, r.h - 8.0 * s), theme::ACCENT());
+                ui.fb.fill_polygon(&[(x - 5.0 * s, r.y + 3.0 * s), (x + 5.5 * s, r.y + 3.0 * s), (x + 0.25 * s, r.y + 9.0 * s)], theme::ACCENT());
                 x += 4.0 * s;
             }
         }
@@ -957,7 +955,7 @@ impl State {
 
         // Строка состояния.
         let status = self.status_text();
-        ui.text_in(Rect::new(r.right() - status_w, r.y, status_w - 12.0 * s, r.h), &status, 11.5, theme::TEXT_DIM, 2);
+        ui.text_in(Rect::new(r.right() - status_w, r.y, status_w - 12.0 * s, r.h), &status, 11.5, theme::TEXT_DIM(), 2);
     }
 
     fn status_text(&self) -> String {
@@ -1023,7 +1021,7 @@ impl State {
         for (i, (ic, tip, act, active)) in items.into_iter().enumerate() {
             match act {
                 None => {
-                    ui.fb.fill_rect(Rect::new(x + 2.0 * s, y + 6.0 * s, 1.0, bs - 12.0 * s), theme::TOOLBAR_BORDER);
+                    ui.fb.fill_rect(Rect::new(x + 2.0 * s, y + 6.0 * s, 1.0, bs - 12.0 * s), theme::TOOLBAR_BORDER());
                     x += 6.0 * s;
                 }
                 Some(a) => {
@@ -1121,8 +1119,8 @@ impl State {
             let h = 34.0 * s;
             let r = Rect::new(self.layout.view.right() - w - 14.0 * s, y - h, w, h);
             ui.fb.shadow(r, 6.0 * s, 5.0 * s, (60.0 * alpha) as u8);
-            ui.fb.fill_rounded(r, 6.0 * s, fade(theme::TOOLTIP, alpha));
-            ui.fb.fill_circle(r.x + 16.0 * s, r.y + h * 0.5, 4.5 * s, fade(if t.error { theme::DANGER } else { theme::OK }, alpha));
+            ui.fb.fill_rounded(r, 6.0 * s, fade(theme::TOOLTIP(), alpha));
+            ui.fb.fill_circle(r.x + 16.0 * s, r.y + h * 0.5, 4.5 * s, fade(if t.error { theme::DANGER() } else { theme::OK() }, alpha));
             ui.text_in(Rect::new(r.x + 28.0 * s, r.y, r.w - 34.0 * s, r.h), &t.text, 12.5, fade(0xFFFF_FFFF, alpha), 0);
             y -= h + 8.0 * s;
         }

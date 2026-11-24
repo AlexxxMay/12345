@@ -1,20 +1,20 @@
 [package]
-name = "forgecad"
-version = "0.1.0"
+name = "alphacad"
+version = "0.2.0"
 edition = "2021"
-description = "ForgeCAD — лёгкий 3D CAD редактор (просмотр и моделирование STL/STEP/OBJ/PLY) в духе Fusion 360"
+description = "AlphaCad — лёгкий 3D CAD редактор (просмотр и моделирование STL/STEP/3MF/OBJ/PLY)"
 license = "MIT"
-authors = ["ForgeCAD contributors"]
+authors = ["Alex Abmaev"]
 readme = "README.md"
 keywords = ["cad", "3d", "stl", "step", "modeling", "viewer"]
 categories = ["graphics", "gui"]
 
 [lib]
-name = "forgecad"
+name = "alphacad"
 path = "src/lib.rs"
 
 [[bin]]
-name = "forgecad"
+name = "alphacad"
 path = "src/main.rs"
 
 # NOTE: проект намеренно не использует внешних зависимостей (только std),

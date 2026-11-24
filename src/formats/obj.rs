@@ -109,7 +109,7 @@ pub fn save(mesh: &Mesh, path: &Path) -> Result<(), String> {
 
 pub fn to_string(mesh: &Mesh) -> String {
     let mut s = String::new();
-    s.push_str(&format!("# ForgeCAD OBJ export: {}\n", mesh.name));
+    s.push_str(&format!("# AlphaCad OBJ export: {}\n", mesh.name));
     for p in &mesh.positions {
         s.push_str(&format!("v {} {} {}\n", p.x, p.y, p.z));
     }

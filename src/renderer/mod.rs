@@ -1,5 +1,7 @@
-//! Рендеринг: 2D-холст интерфейса и программный 3D-растеризатор.
+//! Рендеринг: 2D-холст интерфейса, программный 3D-растеризатор (CPU)
+//! и аппаратный рендер через OpenGL (GPU).
 pub mod canvas;
+pub mod gpu;
 pub mod software;
 
 pub use canvas::{argb, rgb, Framebuffer, Rect};

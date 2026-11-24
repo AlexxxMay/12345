@@ -291,7 +291,7 @@ pub fn draw(fb: &mut Framebuffer, icon: Icon, r: Rect, c: u32) {
         Icon::Sketch | Icon::SketchItem => {
             p.poly(&[(2.0, 16.0), (14.0, 12.0), (22.0, 16.0), (10.0, 20.0)], 0xFFFD_E3C6);
             p.stroke(&[(2.0, 16.0), (14.0, 12.0), (22.0, 16.0), (10.0, 20.0)], 1.0, ORANGE, true);
-            p.line(17.0, 3.0, 9.0, 13.0, 3.6, 0xFF4A_5059);
+            p.line(17.0, 3.0, 9.0, 13.0, 3.6, if super::theme::is_dark() { 0xFF9A_A4B2 } else { 0xFF4A_5059 });
             p.poly(&[(9.0, 13.0), (7.5, 16.0), (10.8, 14.6)], ORANGE);
             p.line(17.0, 3.0, 19.0, 4.6, 3.6, RED);
         }
@@ -531,7 +531,7 @@ pub fn draw(fb: &mut Framebuffer, icon: Icon, r: Rect, c: u32) {
         Icon::Shaded => p.iso_box(12.0, 3.0, 8.0, 9.0),
         Icon::ShadedEdges => {
             p.iso_box(12.0, 3.0, 8.0, 9.0);
-            p.stroke(&[(12.0, 3.0), (20.0, 7.0), (20.0, 16.0), (12.0, 20.0), (4.0, 16.0), (4.0, 7.0)], 1.8, 0xFF20_2428, true);
+            p.stroke(&[(12.0, 3.0), (20.0, 7.0), (20.0, 16.0), (12.0, 20.0), (4.0, 16.0), (4.0, 7.0)], 1.8, if super::theme::is_dark() { 0xFFD0_D6DE } else { 0xFF20_2428 }, true);
         }
         Icon::Wireframe => {
             p.stroke(&[(12.0, 3.0), (20.0, 7.0), (20.0, 16.0), (12.0, 20.0), (4.0, 16.0), (4.0, 7.0)], 1.4, c, true);
@@ -566,4 +566,12 @@ pub fn draw(fb: &mut Framebuffer, icon: Icon, r: Rect, c: u32) {
             p.stroke(&[(2.0, 14.0), (14.0, 8.0), (22.0, 12.0), (10.0, 18.0)], 1.2, ORANGE, true);
         }
     }
+}
+
+/// Логотип AlphaCad (128×128 RGBA), встроен в исполняемый файл.
+static LOGO_RGBA: &[u8] = include_bytes!("../../assets/logo/logo-128.rgba");
+
+/// Нарисовать логотип приложения в прямоугольник `r`.
+pub fn draw_logo(fb: &mut Framebuffer, r: Rect) {
+    fb.draw_rgba(LOGO_RGBA, 128, 128, r);
 }

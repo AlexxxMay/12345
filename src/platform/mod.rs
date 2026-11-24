@@ -150,7 +150,16 @@ pub fn config_dir() -> PathBuf {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
     };
-    let dir = base.unwrap_or_else(std::env::temp_dir).join("ForgeCAD");
+    let base = base.unwrap_or_else(std::env::temp_dir);
+    let dir = base.join("AlphaCad");
+    if !dir.exists() {
+        // Перенос настроек прежней версии (ForgeCAD).
+        let old = base.join("ForgeCAD").join("config.ini");
+        let _ = std::fs::create_dir_all(&dir);
+        if old.exists() {
+            let _ = std::fs::copy(old, dir.join("config.ini"));
+        }
+    }
     let _ = std::fs::create_dir_all(&dir);
     dir
 }

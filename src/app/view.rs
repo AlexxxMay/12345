@@ -598,7 +598,7 @@ impl State {
                 _ => format!("× {}", crate::ui::fmt_num(g.value)),
             };
             let (mx, my) = ui.input.mouse;
-            label_box(ui, mx + 16.0 * s, my + 14.0 * s, &txt, theme::TOOLTIP, 0xFFFF_FFFF);
+            label_box(ui, mx + 16.0 * s, my + 14.0 * s, &txt, theme::TOOLTIP(), 0xFFFF_FFFF);
         }
         ui.fb.reset_clip();
     }
@@ -843,7 +843,7 @@ impl State {
                     (Tool::Circle, Some(a)) => format!("⌀ {}", crate::ui::fmt_num(a.distance(h) * 2.0)),
                     _ => format!("{}, {}", crate::ui::fmt_num(h.x), crate::ui::fmt_num(h.y)),
                 };
-                label_box(ui, p.0 + 14.0 * s, p.1 + 12.0 * s, &txt, 0xF0FF_FFFF, theme::TEXT);
+                label_box(ui, p.0 + 14.0 * s, p.1 + 12.0 * s, &txt, theme::LABEL_BG(), theme::TEXT());
             }
         }
         ui.fb.reset_clip();
@@ -901,7 +901,7 @@ impl State {
         let mk = |ui: &mut Ui, p: Vec3, st: &State| {
             if let Some(sp) = st.to_screen(p) {
                 ui.fb.fill_circle(sp.0, sp.1, 5.0 * s, 0xFFFF_FFFF);
-                ui.fb.fill_circle(sp.0, sp.1, 3.5 * s, theme::ACCENT);
+                ui.fb.fill_circle(sp.0, sp.1, 3.5 * s, theme::ACCENT());
             }
         };
         if let Some(a) = self.measure.a {
@@ -917,8 +917,8 @@ impl State {
                 let txt = format!("{} {mm}", crate::ui::fmt_num(d.len()));
                 let sub = format!("ΔX {}  ΔY {}  ΔZ {}", crate::ui::fmt_num(d.x), crate::ui::fmt_num(d.y), crate::ui::fmt_num(d.z));
                 let (cx, cy) = ((pa.0 + pb.0) * 0.5, (pa.1 + pb.1) * 0.5);
-                label_box(ui, cx + 8.0 * s, cy - 30.0 * s, &txt, theme::ACCENT, 0xFFFF_FFFF);
-                label_box(ui, cx + 8.0 * s, cy - 8.0 * s, &sub, 0xF0FF_FFFF, theme::TEXT);
+                label_box(ui, cx + 8.0 * s, cy - 30.0 * s, &txt, theme::ACCENT(), 0xFFFF_FFFF);
+                label_box(ui, cx + 8.0 * s, cy - 8.0 * s, &sub, theme::LABEL_BG(), theme::TEXT());
             }
         }
         ui.fb.reset_clip();
@@ -944,7 +944,7 @@ impl State {
         for f in [self.cam.target.x, self.cam.target.y, self.cam.target.z, self.cam.yaw, self.cam.pitch, self.cam.distance, rs, self.scale] {
             hash_f(&mut h, f);
         }
-        (vw, vh, self.cam.ortho, self.scene.revision, self.scene.selected, self.hover_body, self.cfg.show_grid, self.cfg.dark_bg).hash(&mut h);
+        (vw, vh, self.cam.ortho, self.scene.revision, self.scene.selected, self.hover_body, self.cfg.show_grid, self.cfg.dark_bg, theme::is_dark(), self.cfg.gpu, self.gpu.is_some()).hash(&mut h);
         (self.cfg.mode as u8, self.tool, self.gizmo_hover, navigating, self.cfg.crease_deg as u32, self.scene.bodies.len()).hash(&mut h);
         if let Some(Drag::Gizmo(g)) = self.drag {
             g.axis.hash(&mut h);
@@ -1049,7 +1049,7 @@ impl State {
 
         let mut lines: Vec<Line3> = Vec::new();
         if self.cfg.show_grid && self.sketch.is_none() {
-            let step = software::grid_lines(&self.cam, &mut lines);
+            let step = software::grid_lines(&self.cam, &mut lines, self.cfg.dark_bg || theme::is_dark());
             lines.push(Line3 { a: Vec3::zero(), b: Vec3::new(0.0, 0.0, step * 5.0), color: 0xC03C_6FD8, width: 1.3, depth_test: true });
         }
         self.sketch_lines(&mut lines);
@@ -1068,12 +1068,39 @@ impl State {
             settings.bg_top = 0xFF4A_5260;
             settings.bg_bottom = 0xFF1E_2228;
             settings.edge_color = 0xD010_1214;
+        } else if theme::is_dark() {
+            // Тёмная тема: графитовый фон вида.
+            settings.bg_top = 0xFF4A_4D53;
+            settings.bg_bottom = 0xFF26_282B;
+            settings.edge_color = 0xD010_1214;
         }
         if self.cfg.mode == DisplayMode::Wireframe {
             settings.skip_edges = settings.skip_edges && total_tris > 2_000_000;
         }
         let aspect_cam = self.cam;
-        let stats = software::render(&mut self.view_fb, &aspect_cam, &items, &lines, &settings);
+        // Видеокарта (если выбрана и доступна), иначе — программный рендер.
+        let mut gpu_stats = None;
+        if self.cfg.gpu {
+            if self.gpu.is_none() && self.gpu_error.is_none() {
+                match crate::renderer::gpu::GpuRenderer::new() {
+                    Ok(g) => self.gpu = Some(g),
+                    Err(e) => self.gpu_error = Some(e),
+                }
+            }
+            if let Some(g) = self.gpu.as_mut() {
+                match g.render(&mut self.view_fb, &aspect_cam, &items, &lines, &settings) {
+                    Ok(st) => gpu_stats = Some(st),
+                    Err(e) => {
+                        self.gpu = None;
+                        self.gpu_error = Some(e);
+                    }
+                }
+            }
+        }
+        let stats = match gpu_stats {
+            Some(st) => st,
+            None => software::render(&mut self.view_fb, &aspect_cam, &items, &lines, &settings),
+        };
         self.last_render_ms = stats.millis;
         self.last_tris = total_tris;
     }
@@ -1089,7 +1116,7 @@ impl State {
         if self.scene.bodies.is_empty() && self.sketch.is_none() && self.dialog.is_none() {
             let lines = [
                 t("Начните работу", "Get started"),
-                t("Откройте модель STL / STEP / OBJ / PLY — Ctrl+O, или перетащите файл в окно", "Open an STL / STEP / OBJ / PLY model — Ctrl+O, or drop a file here"),
+                t("Откройте модель STL / STEP / 3MF / OBJ / PLY — Ctrl+O, или перетащите файл в окно", "Open an STL / STEP / 3MF / OBJ / PLY model — Ctrl+O, or drop a file here"),
                 t("Создайте тело на ленте «Твёрдое тело» или начните эскиз", "Create a body on the Solid tab or start a sketch"),
                 t("ЛКМ — вращение, ПКМ/СКМ — сдвиг, колесо — масштаб", "LMB orbit · RMB/MMB pan · wheel zoom"),
             ];
@@ -1098,7 +1125,7 @@ impl State {
                 let size = if i == 0 { 20.0 } else { 13.0 };
                 let tw = ui.text_width(l, size);
                 let y = cy + if i == 0 { 0.0 } else { 14.0 * s + i as f32 * 22.0 * s };
-                ui.text(v.x + (v.w - tw) * 0.5, y, l, size, if i == 0 { theme::TEXT } else { theme::TEXT_DIM });
+                ui.text(v.x + (v.w - tw) * 0.5, y, l, size, if i == 0 { theme::TEXT() } else { theme::TEXT_DIM() });
             }
         }
 
@@ -1142,7 +1169,7 @@ impl State {
             t("мс", "ms")
         );
         let tw = ui.text_width(&info, 10.5);
-        ui.text(v.right() - tw - 10.0 * s, v.bottom() - 18.0 * s, &info, 10.5, fade(theme::TEXT_DIM, 0.9));
+        ui.text(v.right() - tw - 10.0 * s, v.bottom() - 18.0 * s, &info, 10.5, fade(theme::TEXT_DIM(), 0.9));
     }
 
     // -----------------------------------------------------------------------
@@ -1200,13 +1227,14 @@ impl State {
             let (u, w) = if n.z.abs() > 0.5 { (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)) } else if n.x.abs() > 0.5 { (Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)) } else { (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)) };
             let pts: Vec<(f32, f32)> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().map(|&(a, b)| proj(n + u * a + w * b)).collect();
             let shade = 0.80 + 0.20 * facing;
-            let base = (shade * 255.0) as u32;
+            let dark = theme::is_dark();
+            let base = (shade * if dark { 0.40 } else { 1.0 } * 255.0) as u32;
             let mut col = 0xFF00_0000 | (base.min(255) << 16) | ((base.min(255)) << 8) | (base + 6).min(255);
             if hover_dir == Some(n) {
-                col = 0xFFBF_DDF8;
+                col = if dark { 0xFF2F_4A66 } else { 0xFFBF_DDF8 };
             }
             ui.fb.fill_polygon(&pts, col);
-            ui.fb.polyline(&pts, 1.2 * s, 0xFF8A_96A6, true);
+            ui.fb.polyline(&pts, 1.2 * s, if dark { 0xFF6A_707A } else { 0xFF8A_96A6 }, true);
             if facing > 0.22 {
                 let label = if super::lang_en() { en } else { ru };
                 let mut fs = 9.0 * facing.sqrt().max(0.75);
@@ -1219,7 +1247,7 @@ impl State {
                 let c = proj(n);
                 let tw = ui.text_width(label, fs);
                 let a = (((facing - 0.22) / 0.2).min(1.0) * 255.0) as u8;
-                ui.text(c.0 - tw * 0.5, c.1 - 6.0 * s * facing.sqrt(), label, fs, argb(a, 0x3A, 0x42, 0x4E));
+                ui.text(c.0 - tw * 0.5, c.1 - 6.0 * s * facing.sqrt(), label, fs, if theme::is_dark() { argb(a, 0xD0, 0xD3, 0xD8) } else { argb(a, 0x3A, 0x42, 0x4E) });
             }
         }
         // Подсветка ребра/угла.
@@ -1227,7 +1255,7 @@ impl State {
             let nz = (d.x != 0.0) as u8 + (d.y != 0.0) as u8 + (d.z != 0.0) as u8;
             if nz > 1 {
                 let p = proj(d * 0.92);
-                ui.fb.fill_circle(p.0, p.1, 5.0 * s, theme::ACCENT);
+                ui.fb.fill_circle(p.0, p.1, 5.0 * s, theme::ACCENT());
             }
             ui.st.cursor = Cursor::Hand;
             if ui.input.pressed[0] {

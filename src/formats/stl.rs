@@ -107,7 +107,7 @@ pub fn save(mesh: &Mesh, path: &Path) -> Result<(), String> {
 pub fn to_binary(mesh: &Mesh) -> Vec<u8> {
     let n = mesh.triangle_count();
     let mut out = Vec::with_capacity(84 + n * 50);
-    out.extend_from_slice(b"ForgeCAD STL");
+    out.extend_from_slice(b"AlphaCad STL");
     out.resize(80, 0);
     out.extend_from_slice(&(n as u32).to_le_bytes());
     for i in 0..n {

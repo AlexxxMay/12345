@@ -1,4 +1,4 @@
-//! Формат проекта ForgeCAD (`.forge`) — JSON с описанием сцены.
+//! Формат проекта AlphaCad (`.acad`) — JSON с описанием сцены.
 //!
 //! Хранит тела (меши как массивы чисел с ограниченной точностью),
 //! трансформации, материалы, эскизы и примитивы. JSON-парсер/сериализатор
@@ -431,7 +431,7 @@ pub fn scene_to_json(scene: &Scene) -> Json {
         })
         .collect();
     Json::Obj(vec![
-        ("format".into(), Json::Str("forgecad-project".into())),
+        ("format".into(), Json::Str("alphacad-project".into())),
         ("version".into(), Json::Num(1.0)),
         ("bodies".into(), Json::Arr(bodies)),
     ])
@@ -547,8 +547,8 @@ pub fn load_project(path: &Path) -> Result<Scene, String> {
         .map_err(|e| format!("Не удалось прочитать {}: {e}", path.display()))?;
     let json = parse_json(&text)?;
     let fmt = json.get("format").and_then(|v| v.as_str()).unwrap_or("");
-    if fmt != "forgecad-project" {
-        return Err("Не файл проекта ForgeCAD".into());
+    if fmt != "alphacad-project" && fmt != "forgecad-project" {
+        return Err("Не файл проекта AlphaCad".into());
     }
     let mut scene = Scene::new();
     if let Some(bodies) = json.get("bodies").and_then(|v| v.as_arr()) {
@@ -602,7 +602,7 @@ mod tests {
         let json = scene_to_json(&scene);
         let text = to_json_string(&json);
         let back = parse_json(&text).unwrap();
-        assert_eq!(back.get("format").and_then(|v| v.as_str()), Some("forgecad-project"));
+        assert_eq!(back.get("format").and_then(|v| v.as_str()), Some("alphacad-project"));
         let bodies = back.get("bodies").and_then(|v| v.as_arr()).unwrap();
         assert_eq!(bodies.len(), 1);
         let mesh = json_mesh(bodies[0].get("mesh").unwrap());

@@ -1,10 +1,11 @@
 //! Командная строка.
 //!
 //! ```text
-//! forgecad [файлы…]                         — запуск редактора
-//! forgecad info <файл>                      — сведения о модели
-//! forgecad convert <вход> <выход> [--ascii] — конвертация форматов
-//! forgecad snapshot <выход.png> [файлы…] [--size WxH] [--lang ru|en] [--script a,b,…]
+//! alphacad [файлы…]                         — запуск редактора
+//! alphacad info <файл>                      — сведения о модели
+//! alphacad convert <вход> <выход> [--ascii] — конвертация форматов
+//! alphacad snapshot <выход.png> [файлы…] [--size WxH] [--lang ru|en] [--theme light|dark]
+//!          [--render cpu|gpu] [--require-gpu] [--script a,b,…]
 //!                                           — снимок интерфейса без окна
 //! ```
 
@@ -18,7 +19,7 @@ pub enum Command {
     Gui(Vec<PathBuf>),
     Info(PathBuf),
     Convert { input: PathBuf, output: PathBuf, ascii: bool },
-    Snapshot { output: PathBuf, files: Vec<PathBuf>, size: (usize, usize), lang: Option<bool>, script: Vec<String> },
+    Snapshot { output: PathBuf, files: Vec<PathBuf>, size: (usize, usize), lang: Option<bool>, script: Vec<String>, opts: SnapshotOpts },
     Help,
     Version,
 }
@@ -55,6 +56,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             let mut size = (1440, 900);
             let mut lang = None;
             let mut script = Vec::new();
+            let mut opts = SnapshotOpts::default();
             let mut i = 1;
             while i < args.len() {
                 let a = &args[i];
@@ -68,6 +70,18 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                     "--lang" => {
                         i += 1;
                         lang = Some(args.get(i).map(|s| s == "en").unwrap_or(false));
+                    }
+                    "--theme" => {
+                        i += 1;
+                        opts.dark = Some(args.get(i).map(|s| s == "dark").unwrap_or(false));
+                    }
+                    "--render" => {
+                        i += 1;
+                        opts.gpu = Some(args.get(i).map(|s| s == "gpu").unwrap_or(false));
+                    }
+                    "--require-gpu" => {
+                        opts.gpu = Some(true);
+                        opts.require_gpu = true;
                     }
                     "--script" => {
                         i += 1;
@@ -83,21 +97,33 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                 }
                 i += 1;
             }
-            Ok(Command::Snapshot { output: output.ok_or("snapshot: укажите выходной PNG")?, files, size, lang, script })
+            Ok(Command::Snapshot { output: output.ok_or("snapshot: укажите выходной PNG")?, files, size, lang, script, opts })
         }
         _ => Ok(Command::Gui(args.iter().filter(|a| !a.starts_with("-psn_")).map(PathBuf::from).collect())),
     }
 }
 
-pub const HELP: &str = "ForgeCAD — лёгкий 3D CAD-редактор (STL, STEP, OBJ, PLY)
+pub const HELP: &str = "AlphaCad — лёгкий 3D CAD-редактор (STL, STEP, 3MF, OBJ, PLY)
 
 Использование:
-  forgecad [файлы…]                          запуск редактора
-  forgecad info <файл>                       сведения о модели
-  forgecad convert <вход> <выход> [--ascii]  конвертация (формат по расширению)
-  forgecad snapshot <out.png> [файлы…] [--size WxH] [--lang ru|en]
+  alphacad [файлы…]                          запуск редактора
+  alphacad info <файл>                       сведения о модели
+  alphacad convert <вход> <выход> [--ascii]  конвертация (формат по расширению)
+  alphacad snapshot <out.png> [файлы…] [--size WxH] [--lang ru|en]
+           [--theme light|dark] [--render cpu|gpu] [--require-gpu]
                                              снимок интерфейса без окна
-  forgecad --version";
+  alphacad --version";
+
+/// Дополнительные параметры снимка.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SnapshotOpts {
+    /// Тёмная тема интерфейса.
+    pub dark: Option<bool>,
+    /// Рендер на видеокарте.
+    pub gpu: Option<bool>,
+    /// Ошибка, если видеокарта недоступна (для проверки в CI).
+    pub require_gpu: bool,
+}
 
 /// Выполнение консольной команды. Возвращает код выхода.
 pub fn run_console(cmd: Command) -> i32 {
@@ -108,7 +134,7 @@ pub fn run_console(cmd: Command) -> i32 {
             0
         }
         Command::Version => {
-            println!("ForgeCAD {}", crate::VERSION);
+            println!("AlphaCad {}", crate::VERSION);
             0
         }
         Command::Info(p) => match formats::load_mesh(&p) {
@@ -131,7 +157,7 @@ pub fn run_console(cmd: Command) -> i32 {
                 1
             }
         },
-        Command::Snapshot { output, files, size, lang, script } => match snapshot(&output, files, size, lang, &script) {
+        Command::Snapshot { output, files, size, lang, script, opts } => match snapshot(&output, files, size, lang, &script, &opts) {
             Ok(()) => 0,
             Err(e) => {
                 eprintln!("ошибка: {e}");
@@ -155,11 +181,18 @@ pub fn convert(input: &Path, output: &Path, ascii: bool) -> Result<(), String> {
 /// Шаги сценария: `box`, `cylinder`, `sphere`, `torus`, `ok` (Enter), `esc`, `fit`,
 /// `wire`, `help`, `settings`, `sketch`, `info`, `click:X:Y`, `rclick:X:Y`, `move:X:Y`,
 /// `drag:X1:Y1:X2:Y2`, `key:c`.
-pub fn snapshot(output: &Path, files: Vec<PathBuf>, size: (usize, usize), lang: Option<bool>, script: &[String]) -> Result<(), String> {
+pub fn snapshot(output: &Path, files: Vec<PathBuf>, size: (usize, usize), lang: Option<bool>, script: &[String], opts: &SnapshotOpts) -> Result<(), String> {
     let mut app = App::new(files);
     if let Some(en) = lang {
         app.st.cfg.lang_en = en;
         crate::app::set_lang_en(en);
+    }
+    if let Some(dark) = opts.dark {
+        app.st.cfg.dark_theme = dark;
+        crate::ui::theme::set_dark(dark);
+    }
+    if let Some(gpu) = opts.gpu {
+        app.st.cfg.gpu = gpu;
     }
     app.event(Event::Resize { width: size.0, height: size.1, scale: 1.0 });
     app.frame();
@@ -220,6 +253,20 @@ pub fn snapshot(output: &Path, files: Vec<PathBuf>, size: (usize, usize), lang: 
         settle(&mut app);
     }
     settle(&mut app);
+    if app.st.cfg.gpu {
+        match (&app.st.gpu, &app.st.gpu_error) {
+            (Some(g), _) => println!("renderer: GPU {} ({:.1} ms)", g.info, app.st.last_render_ms),
+            (None, e) => {
+                let e = e.clone().unwrap_or_default();
+                println!("renderer: CPU (GPU unavailable: {e})");
+                if opts.require_gpu {
+                    return Err(format!("GPU недоступен: {e}"));
+                }
+            }
+        }
+    } else {
+        println!("renderer: CPU ({:.1} ms)", app.st.last_render_ms);
+    }
     let fb = app.framebuffer();
     let png = crate::renderer::canvas::encode_png(fb.width, fb.height, &fb.to_rgb8());
     std::fs::write(output, png).map_err(|e| e.to_string())

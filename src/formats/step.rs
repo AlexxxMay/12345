@@ -1166,9 +1166,9 @@ fn iso_timestamp_now() -> String {
 pub fn to_step_string(mesh: &Mesh) -> String {
     let mut out = String::new();
     out.push_str("ISO-10303-21;\nHEADER;\n");
-    out.push_str("FILE_DESCRIPTION(('ForgeCAD STEP export'),'2;1');\n");
+    out.push_str("FILE_DESCRIPTION(('AlphaCad STEP export'),'2;1');\n");
     out.push_str(&format!(
-        "FILE_NAME('{}','{}',('ForgeCAD'),(''),'ForgeCAD {}','ForgeCAD','');\n",
+        "FILE_NAME('{}','{}',('AlphaCad'),(''),'AlphaCad {}','AlphaCad','');\n",
         step_name(&mesh.name),
         iso_timestamp_now(),
         crate::VERSION
@@ -1260,7 +1260,7 @@ pub fn to_step_string(mesh: &Mesh) -> String {
 
     // Минимальная структура продукта.
     let prod = alloc(&mut next_id);
-    out.push_str(&format!("#{prod} = PRODUCT('ForgeCAD Part','ForgeCAD Part','',());\n"));
+    out.push_str(&format!("#{prod} = PRODUCT('AlphaCad Part','AlphaCad Part','',());\n"));
     let form = alloc(&mut next_id);
     out.push_str(&format!("#{form} = PRODUCT_FORMATION_WITH_SPECIFIED_SOURCE('','',#{prod},.NOT_KNOWN.);\n"));
     let shape_rep = alloc(&mut next_id);

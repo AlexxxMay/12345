@@ -8,17 +8,17 @@ use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=assets/icon/forgecad.ico");
+    println!("cargo:rerun-if-changed=assets/icon/alphacad.ico");
     let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     if os != "windows" || target_env != "msvc" {
         return;
     }
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let ico = fs::read("assets/icon/forgecad.ico").expect("assets/icon/forgecad.ico");
+    let ico = fs::read("assets/icon/alphacad.ico").expect("assets/icon/alphacad.ico");
     let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.1.0".into());
     let res = build_res(&ico, &manifest(), &version);
-    let path = out.join("forgecad.res");
+    let path = out.join("alphacad.res");
     fs::write(&path, res).unwrap();
     println!("cargo:rustc-link-arg-bins={}", path.display());
     println!("cargo:rustc-link-arg-bins=/MANIFEST:NO");
@@ -27,8 +27,8 @@ fn main() {
 fn manifest() -> String {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="ForgeCAD" version="1.0.0.0" processorArchitecture="amd64"/>
-  <description>ForgeCAD</description>
+  <assemblyIdentity type="win32" name="AlphaCad" version="1.0.0.0" processorArchitecture="amd64"/>
+  <description>AlphaCad</description>
   <dependency>
     <dependentAssembly>
       <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
@@ -170,13 +170,13 @@ fn version_info(version: &str) -> Vec<u8> {
     u32le(&mut fixed, 0);
     u32le(&mut fixed, 0);
     let strings = vec![
-        string_node("CompanyName", "ForgeCAD"),
-        string_node("FileDescription", "ForgeCAD — 3D CAD editor"),
+        string_node("CompanyName", "AlphaCad"),
+        string_node("FileDescription", "AlphaCad — 3D CAD editor"),
         string_node("FileVersion", version),
-        string_node("InternalName", "forgecad"),
+        string_node("InternalName", "alphacad"),
         string_node("LegalCopyright", "MIT License"),
-        string_node("OriginalFilename", "forgecad.exe"),
-        string_node("ProductName", "ForgeCAD"),
+        string_node("OriginalFilename", "alphacad.exe"),
+        string_node("ProductName", "AlphaCad"),
         string_node("ProductVersion", version),
     ];
     let table = node("040904B0", &[], 0, true, &strings);

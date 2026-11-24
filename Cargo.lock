@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "forgecad"
-version = "0.1.0"
+name = "alphacad"
+version = "0.2.0"

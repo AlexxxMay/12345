@@ -1,4 +1,4 @@
-//! Приложение ForgeCAD: состояние, конфигурация, локализация и цикл кадра.
+//! Приложение AlphaCad: состояние, конфигурация, локализация и цикл кадра.
 //!
 //! Раскладка в духе Fusion 360: верхняя панель приложения, лента инструментов
 //! с вкладками, плавающий браузер слева, ViewCube справа сверху, панель
@@ -73,6 +73,10 @@ pub struct Config {
     pub crease_deg: f32,
     pub recent: Vec<String>,
     pub dark_bg: bool,
+    /// Тёмная тема интерфейса (графит).
+    pub dark_theme: bool,
+    /// Рендер 3D на видеокарте (OpenGL); иначе — на процессоре.
+    pub gpu: bool,
 }
 
 impl Default for Config {
@@ -89,6 +93,8 @@ impl Default for Config {
             crease_deg: 35.0,
             recent: Vec::new(),
             dark_bg: false,
+            dark_theme: false,
+            gpu: false,
         }
     }
 }
@@ -113,6 +119,8 @@ impl Config {
                 "grid" => c.show_grid = v == "1",
                 "snap" => c.snap = v == "1",
                 "dark_bg" => c.dark_bg = v == "1",
+                "theme" => c.dark_theme = v == "dark",
+                "renderer" => c.gpu = v == "gpu",
                 "crease" => c.crease_deg = v.parse().unwrap_or(35.0f32).clamp(1.0, 89.0),
                 "mode" => {
                     c.mode = match v {
@@ -142,6 +150,8 @@ impl Config {
         s.push_str(&format!("grid={}\n", self.show_grid as u8));
         s.push_str(&format!("snap={}\n", self.snap as u8));
         s.push_str(&format!("dark_bg={}\n", self.dark_bg as u8));
+        s.push_str(&format!("theme={}\n", if self.dark_theme { "dark" } else { "light" }));
+        s.push_str(&format!("renderer={}\n", if self.gpu { "gpu" } else { "cpu" }));
         s.push_str(&format!("crease={}\n", self.crease_deg));
         s.push_str(&format!(
             "mode={}\n",
@@ -328,6 +338,10 @@ pub struct State {
     pub pending_open: Vec<PathBuf>,
     pub browser_open: bool,
     pub last_render_ms: f32,
+    /// Аппаратный рендерер (создаётся при выборе «Видеокарта»).
+    pub gpu: Option<crate::renderer::gpu::GpuRenderer>,
+    /// Причина, по которой GPU недоступен (рендер идёт на CPU).
+    pub gpu_error: Option<String>,
     pub last_tris: usize,
     pub navigating_until: Option<Instant>,
     pub rename: Option<(u64, String)>,
@@ -364,6 +378,7 @@ impl App {
     pub fn new(files: Vec<PathBuf>) -> App {
         let cfg = Config::load();
         set_lang_en(cfg.lang_en);
+        crate::ui::theme::set_dark(cfg.dark_theme);
         let st = State {
             scene: Scene::new(),
             cam: Camera::default(),
@@ -392,6 +407,8 @@ impl App {
             pending_open: files,
             browser_open: true,
             last_render_ms: 0.0,
+            gpu: None,
+            gpu_error: None,
             last_tris: 0,
             navigating_until: None,
             rename: None,
@@ -542,7 +559,7 @@ impl State {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| t("Без имени", "Untitled").to_string());
         let dirty = if self.is_dirty() { " •" } else { "" };
-        format!("{name}{dirty} — ForgeCAD {}", crate::VERSION)
+        format!("{name}{dirty} — AlphaCad {}", crate::VERSION)
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -662,6 +679,8 @@ impl State {
         let mut act: Option<Action> = None;
         if ui.shortcut('n') {
             act = Some(Action::New);
+        } else if ui.shortcut_shift('n') {
+            act = Some(Action::NewWindow);
         } else if ui.shortcut('o') {
             act = Some(Action::Open);
         } else if ui.shortcut('i') {
