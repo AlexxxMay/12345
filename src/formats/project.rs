@@ -430,6 +430,11 @@ fn sketch_json(sk: &Sketch) -> Json {
         fields.push(("origin".into(), vec3_json(origin)));
         fields.push(("normal".into(), vec3_json(normal)));
     }
+    if let SketchPlane::Frame { origin, u, v } = sk.plane {
+        fields.push(("origin".into(), vec3_json(origin)));
+        fields.push(("u".into(), vec3_json(u)));
+        fields.push(("v".into(), vec3_json(v)));
+    }
     fields.push(("entities".into(), Json::Arr(ents)));
     Json::Obj(fields)
 }
@@ -543,6 +548,10 @@ fn json_sketch(v: &Json) -> Option<Sketch> {
     let plane_name = v.get("plane").and_then(|x| x.as_str()).unwrap_or("XY");
     let plane = match (plane_name, v.get("origin"), v.get("normal")) {
         ("Custom", Some(o), Some(n)) => SketchPlane::Custom { origin: json_vec3(o), normal: json_vec3(n) },
+        ("Frame", Some(o), _) => match (v.get("u"), v.get("v")) {
+            (Some(u), Some(w)) => SketchPlane::Frame { origin: json_vec3(o), u: json_vec3(u).normalize(), v: json_vec3(w).normalize() },
+            _ => SketchPlane::Xy,
+        },
         _ => SketchPlane::from_name(plane_name),
     };
     let mut sk = Sketch::new(plane);
@@ -670,6 +679,11 @@ mod tests {
         use crate::math::{Vec2, Vec3};
         let v = |x: f32, y: f32| Vec3::new(x, y, 0.0);
         let mut sk = Sketch::new(SketchPlane::offset(SketchPlane::Xz, 12.5));
+        let framed = SketchPlane::from_point_normal(Vec3::new(1.0, 2.0, 3.0), Vec3::new(1.0, -1.0, 0.5));
+        let t2 = to_json_string(&sketch_json(&Sketch::new(framed)));
+        let back2 = json_sketch(&parse_json(&t2).unwrap()).unwrap().plane;
+        let (fa, fb) = (framed.frame(), back2.frame());
+        assert!(fa.0.distance(fb.0) < 1e-3 && fa.1.distance(fb.1) < 1e-4 && fa.2.distance(fb.2) < 1e-4 && fa.3.distance(fb.3) < 1e-4, "{framed:?} {back2:?}");
         sk.name = "Все элементы".into();
         sk.entities.push(SketchEntity::Polygon { center: v(1.0, 2.0), radius: 5.0, sides: 7, rotation: 0.25 });
         sk.entities.push(SketchEntity::Ellipse { center: v(0.0, 0.0), rx: 6.0, ry: 3.0, rotation: 0.5 });

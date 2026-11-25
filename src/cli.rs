@@ -267,6 +267,8 @@ pub fn snapshot(output: &Path, files: Vec<PathBuf>, size: (usize, usize), lang: 
                     "smooth" => Action::Smooth,
                     "coil" => Action::Coil,
                     "finish" => Action::FinishSketch,
+                    "newtab" => Action::NewTab,
+                    "closetab" => Action::CloseTab(app.st.active_tab),
                     "select-last" => {
                         app.st.scene.selected = app.st.scene.bodies.iter().rev().find(|b| !b.mesh.is_empty()).map(|b| b.id);
                         settle(&mut app);
@@ -289,9 +291,27 @@ pub fn snapshot(output: &Path, files: Vec<PathBuf>, size: (usize, usize), lang: 
                     "spline" => Tool::Spline,
                     "fillet" => Tool::SketchFillet,
                     "offset" => Tool::SketchOffset,
+                    "editmesh" => Tool::EditMesh,
+                    "select" => Tool::Select,
+                    "move" => Tool::Move,
                     other => return Err(format!("неизвестный инструмент: {other}")),
                 };
                 app.st.run_action(Action::SetTool(tl));
+            }
+            "undo" => app.st.run_action(Action::Undo),
+            "dump" => {
+                println!(
+                    "selected={:?} tool={:?} dialog={} sketch={} bodies={}",
+                    app.st.scene.selected,
+                    app.st.tool,
+                    app.st.dialog.as_ref().map(|d| format!("{d:?}").split([' ', '{']).next().unwrap_or("").to_string()).unwrap_or_default(),
+                    app.st.sketch.as_ref().map(|s| s.sketch.plane.label()).unwrap_or_else(|| "-".into()),
+                    app.st.scene.bodies.len()
+                );
+                for b in &app.st.scene.bodies {
+                    let bb = b.world_aabb();
+                    println!("  #{} {} tris={} min=({:.2},{:.2},{:.2}) max=({:.2},{:.2},{:.2})", b.id, b.name, b.mesh.triangle_count(), bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
+                }
             }
             "demo" => demo_scene(&mut app, parts.get(1).copied().unwrap_or(""))?,
             "key" => {

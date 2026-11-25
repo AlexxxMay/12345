@@ -16,6 +16,9 @@ pub enum SketchPlane {
     Xz,
     Yz,
     Custom { origin: Vec3, normal: Vec3 },
+    /// Произвольная плоскость с заданными осями (грань модели, текущий вид):
+    /// `u`, `v` — единичные взаимно перпендикулярные оси, нормаль — `u × v`.
+    Frame { origin: Vec3, u: Vec3, v: Vec3 },
 }
 
 impl Default for SketchPlane {
@@ -31,7 +34,28 @@ impl SketchPlane {
             SketchPlane::Xz => "XZ",
             SketchPlane::Yz => "YZ",
             SketchPlane::Custom { .. } => "Custom",
+            SketchPlane::Frame { .. } => "Frame",
         }
+    }
+
+    /// Плоскость по точке и нормали с осями, согласованными с камерой,
+    /// которая смотрит вдоль нормали (`u` — вправо, `v` — вверх по экрану).
+    /// Начало координат эскиза — проекция мирового начала на плоскость.
+    pub fn from_point_normal(point: Vec3, normal: Vec3) -> SketchPlane {
+        let n = normal.normalize();
+        for base in [SketchPlane::Xy, SketchPlane::Xz, SketchPlane::Yz] {
+            let (_, _, _, bn) = base.frame();
+            if n.dot(bn) > 0.9999 {
+                return SketchPlane::offset(base, point.dot(bn));
+            }
+        }
+        // Как у камеры с осью Z вверх: «вверх» — проекция Z, при взгляде сверху/снизу — +Y.
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let pz = z - n * z.dot(n);
+        let v = if pz.len() > 1e-4 { pz.normalize() } else { Vec3::new(0.0, 1.0, 0.0) };
+        let u = v.cross(n).normalize();
+        let origin = n * point.dot(n);
+        SketchPlane::Frame { origin, u, v }
     }
 
     /// Стандартная плоскость, смещённая вдоль своей нормали на `offset`.
@@ -55,6 +79,11 @@ impl SketchPlane {
                     }
                 }
                 "Custom".into()
+            }
+            SketchPlane::Frame { origin, u, v } => {
+                let n = u.cross(v).normalize();
+                let f = |x: f32| crate::ui::fmt_num((x * 100.0).round() / 100.0);
+                format!("⊥ ({}, {}, {}) {}", f(n.x), f(n.y), f(n.z), crate::ui::fmt_num(origin.dot(n)))
             }
             _ => self.name().into(),
         }
@@ -88,6 +117,7 @@ impl SketchPlane {
                 let v = n.cross(u).normalize();
                 (origin, u, v, n)
             }
+            SketchPlane::Frame { origin, u, v } => (origin, u, v, u.cross(v).normalize()),
         }
     }
 
@@ -1062,5 +1092,26 @@ mod tests {
         let p = sk.profiles();
         assert_eq!(p.len(), 1);
         assert_eq!(p[0].len(), 4);
+    }
+
+    #[test]
+    fn frame_plane_matches_camera() {
+        use crate::renderer::software::Camera;
+        for n in [Vec3::new(1.0, -1.0, 0.8), Vec3::new(0.3, 0.2, -0.9), Vec3::new(0.0, 1.0, 0.2)] {
+            let n = n.normalize();
+            let pl = SketchPlane::from_point_normal(Vec3::new(5.0, 6.0, 7.0), n);
+            let (o, u, v, nn) = pl.frame();
+            let mut cam = Camera::default();
+            cam.set_view_dir(n);
+            assert!(nn.dot(n) > 0.9999);
+            assert!(u.dot(cam.right()) > 0.999, "{u:?} {:?}", cam.right());
+            assert!(v.dot(cam.up()) > 0.999);
+            // Точка лежит на плоскости, начало — проекция мирового начала.
+            assert!((Vec3::new(5.0, 6.0, 7.0) - o).dot(nn).abs() < 1e-4);
+            assert!(o.cross(nn).len() < 1e-4);
+        }
+        // Плоскость, параллельная стандартной, остаётся смещённой стандартной.
+        let p = SketchPlane::from_point_normal(Vec3::new(0.0, 0.0, 12.0), Vec3::new(0.0, 0.0, 1.0));
+        assert_eq!(p.label(), "XY +12");
     }
 }

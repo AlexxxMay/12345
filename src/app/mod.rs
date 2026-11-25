@@ -7,7 +7,10 @@
 
 mod actions;
 mod dialogs;
+mod meshedit;
 mod panels;
+mod snap;
+mod tabs;
 mod view;
 
 use crate::math::{Aabb, Color, Mat4, Vec2, Vec3};
@@ -208,6 +211,8 @@ pub enum Tool {
     SketchFillet,
     /// Смещение (эквидистанта) элемента эскиза.
     SketchOffset,
+    /// Ручная правка сетки: грани, рёбра, вершины.
+    EditMesh,
 }
 
 impl Tool {
@@ -272,6 +277,8 @@ pub enum Drag {
     Pan,
     Zoom { anchor: (f32, f32) },
     Gizmo(view::GizmoDrag),
+    /// Перетаскивание элемента сетки (данные — в `State::medit`).
+    MeshEdit,
 }
 
 /// Сеанс редактирования эскиза.
@@ -289,6 +296,8 @@ pub struct SketchSession {
     /// Точка под курсором (с привязкой).
     pub hover: Option<Vec2>,
     pub hover_snapped_to_point: bool,
+    /// Привязка к модели: точка на модели (до проекции на плоскость) и её тип.
+    pub hover_model: Option<(Vec3, snap::SnapKind)>,
     pub prev_camera: Camera,
 }
 
@@ -410,6 +419,16 @@ pub struct State {
     pub preview_error: std::cell::RefCell<Option<(u64, String)>>,
     fill_cache: HashMap<u64, Arc<DisplayMesh>>,
     info_cache: Option<(u64, u64, BodyInfo)>,
+    /// Привязка под курсором (размещение тела, плоскость эскиза по грани).
+    pub snap_hover: Option<snap::ModelSnap>,
+    /// Инструмент «Править грани».
+    pub medit: meshedit::MeshEditState,
+    /// Документы вкладок; слот активной вкладки — заглушка (данные в полях выше).
+    pub tabs: Vec<tabs::DocTab>,
+    pub active_tab: usize,
+    /// Номер документа для заголовка «Без имени N».
+    pub doc_no: u32,
+    next_doc_no: u32,
 }
 
 /// Сведения о теле (кэшируются: объём и площадь дороги для больших мешей).
@@ -482,6 +501,12 @@ impl App {
             preview_error: std::cell::RefCell::new(None),
             fill_cache: HashMap::new(),
             info_cache: None,
+            snap_hover: None,
+            medit: Default::default(),
+            tabs: vec![tabs::DocTab::blank()],
+            active_tab: 0,
+            doc_no: 1,
+            next_doc_no: 1,
         };
         let font_engineering = st.cfg.engineering_font;
         let font = load_ui_font(font_engineering);
@@ -643,7 +668,7 @@ impl State {
             .as_ref()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| t("Без имени", "Untitled").to_string());
+            .unwrap_or_else(|| self.tab_title(self.active_tab).0);
         let dirty = if self.is_dirty() { " •" } else { "" };
         format!("{name}{dirty} — AlphaCad {}", crate::VERSION)
     }
@@ -654,6 +679,10 @@ impl State {
 
     pub fn request_quit(&mut self) {
         if self.is_dirty() {
+            self.dialog = Some(Dialog::ConfirmQuit);
+        } else if let Some(i) = self.other_dirty_tab() {
+            // Несохранённые изменения в другой вкладке: показать её и спросить.
+            self.switch_tab(i);
             self.dialog = Some(Dialog::ConfirmQuit);
         } else {
             self.cfg.save();
@@ -703,6 +732,11 @@ impl State {
         // Файлы из командной строки / перетаскивания.
         if !self.pending_open.is_empty() {
             let files = std::mem::take(&mut self.pending_open);
+            // Проект открывается в новой вкладке, если текущая уже занята.
+            let has_project = files.iter().any(|p| crate::formats::format_of_path(p) == Some(crate::formats::ModelFormat::Project));
+            if has_project && !self.doc_is_blank() {
+                self.new_tab();
+            }
             self.open_files(files, true);
         }
 
@@ -765,8 +799,10 @@ impl State {
         let mut act: Option<Action> = None;
         if ui.shortcut('n') {
             act = Some(Action::New);
-        } else if ui.shortcut_shift('n') {
-            act = Some(Action::NewWindow);
+        } else if ui.shortcut_shift('n') || ui.shortcut('t') {
+            act = Some(Action::NewTab);
+        } else if ui.shortcut('w') {
+            act = Some(Action::CloseTab(self.active_tab));
         } else if ui.shortcut('o') {
             act = Some(Action::Open);
         } else if ui.shortcut('i') {

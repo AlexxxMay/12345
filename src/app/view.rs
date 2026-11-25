@@ -53,10 +53,10 @@ pub struct GizmoDrag {
     pub value: f32,
 }
 
-const AXIS_COLORS: [u32; 3] = [0xFFE0_3E3E, 0xFF35_A853, 0xFF2F_6FE0];
-const AXES: [Vec3; 3] = [Vec3 { x: 1.0, y: 0.0, z: 0.0 }, Vec3 { x: 0.0, y: 1.0, z: 0.0 }, Vec3 { x: 0.0, y: 0.0, z: 1.0 }];
+pub(super) const AXIS_COLORS: [u32; 3] = [0xFFE0_3E3E, 0xFF35_A853, 0xFF2F_6FE0];
+pub(super) const AXES: [Vec3; 3] = [Vec3 { x: 1.0, y: 0.0, z: 0.0 }, Vec3 { x: 0.0, y: 1.0, z: 0.0 }, Vec3 { x: 0.0, y: 0.0, z: 1.0 }];
 
-fn nice_step(raw: f32) -> f32 {
+pub(super) fn nice_step(raw: f32) -> f32 {
     let p = 10f32.powf(raw.max(1e-6).log10().floor());
     let m = raw / p;
     if m >= 5.0 {
@@ -68,11 +68,11 @@ fn nice_step(raw: f32) -> f32 {
     }
 }
 
-fn hash_f(h: &mut DefaultHasher, v: f32) {
+pub(super) fn hash_f(h: &mut DefaultHasher, v: f32) {
     v.to_bits().hash(h);
 }
 
-fn dist_to_seg(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
+pub(super) fn dist_to_seg(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
     let (dx, dy) = (b.0 - a.0, b.1 - a.1);
     let l2 = (dx * dx + dy * dy).max(1e-6);
     let t = (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / l2).clamp(0.0, 1.0);
@@ -80,7 +80,7 @@ fn dist_to_seg(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
     (qx * qx + qy * qy).sqrt()
 }
 
-fn ray_plane(ray: &Ray, plane: &SketchPlane) -> Option<Vec2> {
+pub(super) fn ray_plane(ray: &Ray, plane: &SketchPlane) -> Option<Vec2> {
     let (o, _, _, n) = plane.frame();
     let denom = ray.dir.dot(n);
     if denom.abs() < 1e-8 {
@@ -173,15 +173,24 @@ impl State {
             self.mark_navigating();
         }
 
+        // Режимы размещения: новое тело за курсором, плоскость эскиза по грани.
+        let placing = matches!(self.dialog, Some(super::Dialog::Primitive { place: None, .. }) | Some(super::Dialog::SketchPlane { .. }));
+        self.update_snap_hover(mx, my, in_view, input.mods.shift, ui.s);
+        if self.tool == Tool::EditMesh && self.sketch.is_none() {
+            self.medit_hover(mx, my, in_view && !placing, ui.s);
+        }
+
         // Наведение.
         if self.drag.is_none() {
             let (id, _) = if in_view { self.pick(mx, my) } else { (None, None) };
             let id = id.filter(|i| self.scene.body(*i).map(|b| !b.mesh.is_empty()).unwrap_or(false));
-            self.hover_body = if self.tool.is_sketch() || self.tool == Tool::Measure { None } else { id };
+            self.hover_body = if self.tool.is_sketch() || self.tool == Tool::Measure || self.tool == Tool::EditMesh || placing { None } else { id };
             self.gizmo_hover = if in_view { self.gizmo_hit(mx, my, ui.s) } else { None };
             if in_view {
-                if self.tool.is_sketch() || self.tool == Tool::Measure {
+                if self.tool.is_sketch() || self.tool == Tool::Measure || placing {
                     ui.st.cursor = Cursor::Crosshair;
+                } else if self.tool == Tool::EditMesh && (self.medit.axis_hover.is_some() || self.medit.hover.is_some()) {
+                    ui.st.cursor = if self.medit.axis_hover.is_some() { Cursor::Move } else { Cursor::Hand };
                 } else if self.gizmo_hover.is_some() {
                     ui.st.cursor = Cursor::Move;
                 } else if self.hover_body.is_some() {
@@ -204,9 +213,11 @@ impl State {
             if input.pressed[0] {
                 if self.tool.is_sketch() && self.sketch.is_some() {
                     self.sketch_click();
-                } else if self.tool == Tool::Measure {
+                } else if self.tool == Tool::Measure && !placing {
                     self.measure_click(mx, my, ui.s);
-                } else if let Some(axis) = self.gizmo_hover {
+                } else if self.tool == Tool::EditMesh && !placing && self.medit_start(mx, my, ui.s) {
+                    // Перетаскивание элемента сетки началось.
+                } else if let Some(axis) = self.gizmo_hover.filter(|_| !placing) {
                     self.start_gizmo(axis, mx, my, ui.s);
                 } else {
                     self.drag = Some(Drag::Pending { button: 0, start: (mx, my) });
@@ -295,11 +306,18 @@ impl State {
                 self.update_gizmo(g, mx, my, input.mods.shift);
                 ui.st.cursor = Cursor::Move;
             }
+            Some(Drag::MeshEdit) => {
+                self.medit_update(mx, my, input.mods.shift);
+                ui.st.cursor = Cursor::Move;
+            }
             None => {}
         }
         if self.drag.is_some() && !input.any_down() {
             if let Some(Drag::Gizmo(g)) = self.drag {
                 self.scene.commit_transform(g.body, g.start_tf);
+            }
+            if let Some(Drag::MeshEdit) = self.drag {
+                self.medit_finish();
             }
             self.drag = None;
             self.invalidate_view();
@@ -307,6 +325,13 @@ impl State {
     }
 
     fn click_select(&mut self) {
+        if self.snap_click() {
+            return;
+        }
+        if self.tool == Tool::EditMesh {
+            self.medit_click();
+            return;
+        }
         match self.hover_body {
             Some(id) => {
                 self.scene.selected = Some(id);
@@ -362,7 +387,7 @@ impl State {
         Some((id, b.world_aabb().center()))
     }
 
-    fn gizmo_size(&self, center: Vec3, s: f32) -> f32 {
+    pub(super) fn gizmo_size(&self, center: Vec3, s: f32) -> f32 {
         self.world_per_px(center) * 90.0 * s
     }
 
@@ -625,6 +650,7 @@ impl State {
             pts: Vec::new(),
             hover: None,
             hover_snapped_to_point: false,
+            hover_model: None,
             prev_camera: prev,
         });
         self.tab = super::Tab::Sketch;
@@ -649,6 +675,7 @@ impl State {
         let snap = self.cfg.snap && !shift;
         let ray = self.screen_ray(mx, my);
         let tol = 9.0 * s;
+        let model = if shift { None } else { self.sketch_model_snap(mx, my, s) };
         let Some(sess) = &self.sketch else { return };
         let plane = sess.sketch.plane;
         let Some(p) = ray_plane(&ray, &plane) else {
@@ -672,8 +699,14 @@ impl State {
                 }
             }
         }
+        let mut hm = None;
         let (hp, snapped) = match best {
             Some((_, q)) => (q, true),
+            None if model.is_some() => {
+                let (q, w, k) = model.unwrap();
+                hm = Some((w, k));
+                (q, true)
+            }
             None => {
                 if snap {
                     (Vec2::new((p.x / step).round() * step, (p.y / step).round() * step), false)
@@ -683,9 +716,10 @@ impl State {
             }
         };
         if let Some(sm) = &mut self.sketch {
-            if sm.hover != Some(hp) {
+            if sm.hover != Some(hp) || sm.hover_model != hm {
                 sm.hover = Some(hp);
                 sm.hover_snapped_to_point = snapped;
+                sm.hover_model = hm;
             }
         }
     }
@@ -1028,6 +1062,7 @@ impl State {
             format!("{:?}{:?}{:?}", sess.anchor, sess.hover, sess.sketch.plane).hash(&mut h);
         }
         format!("{:?}{:?}", self.measure.a, self.measure.b).hash(&mut h);
+        format!("{:?}{}", self.snap_hover, self.medit_key()).hash(&mut h);
         let preview_key = self.dialog.as_ref().and_then(|d| d.preview_key(self));
         preview_key.hash(&mut h);
         for b in &self.scene.bodies {
@@ -1136,6 +1171,8 @@ impl State {
         }
         let s = self.scale * self.cfg.ui_scale;
         self.gizmo_lines(s, &mut lines);
+        self.snap_lines(&mut lines);
+        self.medit_lines(s, &mut lines);
 
         let mut settings = RenderSettings::default();
         settings.mode = self.cfg.mode;
@@ -1189,6 +1226,8 @@ impl State {
         self.draw_gizmo_2d(ui);
         self.draw_sketch_2d(ui);
         self.draw_measure_2d(ui);
+        self.draw_snap_2d(ui);
+        self.draw_medit_2d(ui);
 
         // Подсказка для пустой сцены.
         if self.scene.bodies.is_empty() && self.sketch.is_none() && self.dialog.is_none() {
@@ -1373,12 +1412,19 @@ impl State {
         }
         if self.dialog.is_some() {
             self.dialog = None;
+            self.snap_hover = None;
+            self.invalidate_view();
+            return;
+        }
+        if self.tool == Tool::EditMesh && self.medit_escape() {
             self.invalidate_view();
             return;
         }
         if self.tool != Tool::Select {
             self.tool = Tool::Select;
             self.measure = Default::default();
+            self.medit.sel = None;
+            self.medit.hover = None;
         } else {
             self.scene.selected = None;
         }

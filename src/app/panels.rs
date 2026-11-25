@@ -93,20 +93,6 @@ impl State {
             x += bs + 2.0 * s;
         }
 
-        // Вкладка документа по центру.
-        let title = self
-            .project_path
-            .as_ref()
-            .and_then(|p| p.file_stem())
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| t("Без имени", "Untitled").to_string());
-        let title = if self.is_dirty() { format!("{title} •") } else { title };
-        let tw = ui.text_width(&title, 12.5) + 40.0 * s;
-        let tr = Rect::new(((r.w - tw) * 0.5).max(x + 10.0 * s), r.y + 6.0 * s, tw, r.h - 6.0 * s);
-        ui.fb.fill_rounded(Rect::new(tr.x, tr.y, tr.w, tr.h + 6.0 * s), 6.0 * s, theme::TOOLBAR());
-        ui.icon(Icon::Body, Rect::new(tr.x + 9.0 * s, tr.y + (tr.h - 15.0 * s) * 0.5, 15.0 * s, 15.0 * s), theme::TEXT());
-        ui.text_in(Rect::new(tr.x + 28.0 * s, tr.y, tr.w - 32.0 * s, tr.h), &title, 12.5, theme::TEXT(), 0);
-
         // Справа: язык, настройки, справка.
         let mut rx = r.right() - 8.0 * s;
         let right_btns = [
@@ -148,13 +134,79 @@ impl State {
         if clicked {
             self.run_action(Action::ToggleLang);
         }
+
+        // Вкладки документов и кнопка «+».
+        self.draw_doc_tabs(ui, x + 14.0 * s, rx - 12.0 * s);
+    }
+
+    /// Полоса вкладок документов в панели приложения (между `x0` и `x1`).
+    fn draw_doc_tabs(&mut self, ui: &mut Ui, x0: f32, x1: f32) {
+        let r = self.layout.appbar;
+        let s = ui.s;
+        let n = self.tab_count().max(1);
+        let plus_w = 28.0 * s;
+        let avail = (x1 - x0 - plus_w - 6.0 * s).max(60.0 * s);
+        let tab_w = (avail / n as f32 - 2.0 * s).min(220.0 * s);
+        let mut act: Option<Action> = None;
+        let mut tx = x0;
+        for i in 0..n {
+            let (title, dirty) = self.tab_title(i);
+            let active = i == self.active_tab;
+            let tr = Rect::new(tx, r.y + 6.0 * s, tab_w, r.h - 6.0 * s);
+            let cr = Rect::new(tr.right() - 22.0 * s, tr.y + (tr.h - 16.0 * s) * 0.5, 16.0 * s, 16.0 * s);
+            let show_close = tab_w > 70.0 * s;
+            let (ch, _, cclick) = if show_close { ui.interact(id_idx(id_of("doc_tab_x"), i), cr) } else { (false, false, false) };
+            let tid = id_idx(id_of("doc_tab"), i);
+            let (hov, _, clicked) = ui.interact(tid, tr);
+            if active {
+                ui.fb.fill_rounded(Rect::new(tr.x, tr.y, tr.w, tr.h + 6.0 * s), 6.0 * s, theme::TOOLBAR());
+            } else if hov || ch {
+                ui.fb.fill_rounded(Rect::new(tr.x, tr.y + 2.0 * s, tr.w, tr.h - 4.0 * s), 5.0 * s, theme::APPBAR_HOVER());
+            }
+            let fg = if active { theme::TEXT() } else { theme::APPBAR_TEXT() };
+            let mut tx_text = tr.x + 9.0 * s;
+            if tab_w > 90.0 * s {
+                ui.icon(Icon::Body, Rect::new(tr.x + 9.0 * s, tr.y + (tr.h - 15.0 * s) * 0.5, 15.0 * s, 15.0 * s), fg);
+                tx_text = tr.x + 29.0 * s;
+            }
+            let label = if dirty { format!("{title} •") } else { title.clone() };
+            let tw = (if show_close { cr.x - 4.0 * s } else { tr.right() - 4.0 * s }) - tx_text;
+            ui.text_in(Rect::new(tx_text, tr.y, tw.max(0.0), tr.h), &label, 12.5, fg, 0);
+            if show_close && (active || hov || ch) {
+                if ch {
+                    ui.fb.fill_rounded(cr, 3.0 * s, if active { theme::HOVER() } else { theme::APPBAR() });
+                }
+                ui.icon(Icon::Close, cr.shrink(3.0 * s), fg);
+            }
+            ui.set_tooltip(tid, &title);
+            if cclick {
+                act = Some(Action::CloseTab(i));
+            } else if clicked {
+                self.switch_tab(i);
+            }
+            tx += tab_w + 2.0 * s;
+        }
+        let pr = Rect::new(tx + 4.0 * s, r.y + (r.h - plus_w) * 0.5, plus_w, plus_w);
+        let pid = id_of("doc_tab_new");
+        let (hov, _, clicked) = ui.interact(pid, pr);
+        if hov {
+            ui.fb.fill_rounded(pr, 4.0 * s, theme::APPBAR_HOVER());
+        }
+        ui.icon(Icon::Plus, pr.shrink(6.0 * s), theme::APPBAR_TEXT());
+        ui.set_tooltip(pid, t("Новая вкладка (Ctrl+T)", "New tab (Ctrl+T)"));
+        if clicked {
+            act = Some(Action::NewTab);
+        }
+        if let Some(a) = act {
+            self.run_action(a);
+        }
     }
 
     fn file_menu_items(&self) -> Vec<MenuItem> {
         let has = !self.scene.bodies.is_empty();
         let mut v = vec![
             MenuItem::new(Some(Icon::New), t("Новый проект", "New project"), "Ctrl+N", Action::New),
-            MenuItem::new(None, t("Новое окно", "New window"), "Ctrl+Shift+N", Action::NewWindow),
+            MenuItem::new(Some(Icon::Plus), t("Новая вкладка", "New tab"), "Ctrl+T", Action::NewTab),
             MenuItem::new(Some(Icon::Open), t("Открыть…", "Open…"), "Ctrl+O", Action::Open),
             MenuItem::new(Some(Icon::Import), t("Импорт в проект…", "Import into project…"), "Ctrl+I", Action::Import),
             MenuItem::sep(),
@@ -177,6 +229,7 @@ impl State {
             }
         }
         v.push(MenuItem::sep());
+        v.push(MenuItem::new(None, t("Закрыть вкладку", "Close tab"), "Ctrl+W", Action::CloseTab(self.active_tab)));
         v.push(MenuItem::new(Some(Icon::Close), t("Выход", "Exit"), "Ctrl+Q", Action::Quit));
         v
     }
@@ -335,6 +388,20 @@ impl State {
                         en(td(Icon::FlipNormals, t("Развернуть нормали", "Flip normals"), "", "", Action::FlipNormals), sel_mesh),
                         en(td(Icon::Reduce, t("Упростить", "Reduce"), t("Уменьшить число треугольников", "Reduce the triangle count"), "", Action::Reduce), sel_mesh),
                     ],
+                    vec![],
+                ),
+                (
+                    t("ПРАВКА", "EDIT"),
+                    vec![mk_active(
+                        td(
+                            Icon::EditMesh,
+                            t("Править грани", "Edit faces"),
+                            t("Выделите грань, ребро или вершину и тяните стрелкой X / Y / Z или по нормали; «Вытянуть» добавляет боковые стенки", "Select a face, edge or vertex and drag an X / Y / Z or normal arrow; Extrude adds side walls"),
+                            "",
+                            Action::SetTool(Tool::EditMesh),
+                        ),
+                        tool == Tool::EditMesh,
+                    )],
                     vec![],
                 ),
                 (
@@ -551,7 +618,7 @@ impl State {
             .as_ref()
             .and_then(|p| p.file_stem())
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| t("Без имени", "Untitled").to_string());
+            .unwrap_or_else(|| self.tab_title(self.active_tab).0);
         self.tree_header(ui, Rect::new(list.x, y, list.w, row_h), 0, Icon::Body, &doc_name);
         y += row_h;
         self.tree_header(ui, Rect::new(list.x, y, list.w, row_h), 1, Icon::Folder, &format!("{} ({})", t("Начало координат", "Origin"), "XYZ"));
@@ -1056,6 +1123,10 @@ impl State {
         }
         match self.tool {
             Tool::Measure => t("Измерение: щёлкните две точки на поверхности", "Measure: click two points on a surface").into(),
+            Tool::EditMesh => match &self.medit.sel {
+                None => t("Правка граней: щёлкните грань, ребро или вершину", "Edit faces: click a face, edge or vertex").into(),
+                Some(_) => t("Правка граней: тяните стрелку", "Edit faces: drag an arrow").into(),
+            },
             Tool::Move | Tool::Rotate | Tool::Scale if self.scene.selected.is_none() => t("Выберите тело для трансформации", "Select a body to transform").into(),
             _ => match self.scene.selected_body() {
                 Some(b) => format!("{}: {}", t("Выбрано", "Selected"), b.name),

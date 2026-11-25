@@ -1088,18 +1088,23 @@ fn raster_line(l: &SLine, color: &mut [u32], depth: &[f32], w: usize, y0: usize,
 }
 
 /// Линии координатной сетки на плоскости XY вокруг цели камеры.
-pub fn grid_lines(cam: &Camera, out: &mut Vec<Line3>, dark_bg: bool) -> f32 {
-    let target = cam.target;
-    let extent = cam.distance * 2.5;
+/// Шаг видимой сетки плоскости XY для текущего расстояния камеры.
+pub fn grid_step(cam: &Camera) -> f32 {
     let raw = cam.distance / 12.0;
     let p10 = 10f32.powf(raw.max(1e-6).log10().floor());
-    let step = if raw / p10 >= 5.0 {
+    if raw / p10 >= 5.0 {
         p10 * 5.0
     } else if raw / p10 >= 2.0 {
         p10 * 2.0
     } else {
         p10
-    };
+    }
+}
+
+pub fn grid_lines(cam: &Camera, out: &mut Vec<Line3>, dark_bg: bool) -> f32 {
+    let target = cam.target;
+    let extent = cam.distance * 2.5;
+    let step = grid_step(cam);
     let major = step * 5.0;
     let n = (extent / step).ceil() as i32;
     let cx = (target.x / major).round() * major;

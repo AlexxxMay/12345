@@ -54,8 +54,10 @@ impl PrimKind {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
     New,
-    /// Новое окно (отдельный процесс) с пустым рабочим пространством.
-    NewWindow,
+    /// Новая вкладка с пустым документом.
+    NewTab,
+    /// Закрыть вкладку (с подтверждением при несохранённых изменениях).
+    CloseTab(usize),
     Open,
     Import,
     Save,
@@ -180,18 +182,25 @@ impl State {
                     self.reset_document();
                 }
             }
-            Action::NewWindow => {
-                if let Err(e) = spawn_new_window() {
-                    self.toast(&format!("{}: {e}", t("Не удалось открыть новое окно", "Could not open a new window")), true);
+            Action::NewTab => {
+                if self.sketch.is_some() {
+                    self.finish_sketch();
                 }
+                self.new_tab();
+            }
+            Action::CloseTab(i) => {
+                if i == self.active_tab && self.sketch.is_some() {
+                    self.sketch = None;
+                }
+                self.close_tab(i);
             }
             Action::Open => {
-                if self.is_dirty() {
-                    self.dialog = Some(Dialog::ConfirmDiscard { then: Action::Open });
-                    return;
-                }
+                // Открытый документ не трогаем: файл откроется в новой вкладке.
                 let files = crate::platform::open_file_dialog(t("Открыть", "Open"), &self.open_filters(), false);
                 if !files.is_empty() {
+                    if !self.doc_is_blank() {
+                        self.new_tab();
+                    }
                     self.open_files(files, true);
                 }
             }
@@ -204,15 +213,13 @@ impl State {
             Action::OpenRecent(i) => {
                 let Some(p) = self.cfg.recent.get(i).cloned() else { return };
                 let path = PathBuf::from(&p);
-                let is_project = formats::format_of_path(&path) == Some(ModelFormat::Project);
-                if is_project && self.is_dirty() {
-                    self.dialog = Some(Dialog::ConfirmDiscard { then: a });
-                    return;
-                }
                 if !path.exists() {
                     self.cfg.recent.retain(|r| r != &p);
                     self.toast(format!("{}: {p}", t("Файл не найден", "File not found")), true);
                     return;
+                }
+                if !self.doc_is_blank() {
+                    self.new_tab();
                 }
                 self.open_files(vec![path], true);
             }
@@ -251,12 +258,19 @@ impl State {
                     return;
                 }
                 self.tab = Tab::Solid;
-                self.dialog = Some(Dialog::Primitive { prim: k.default_primitive() });
+                self.dialog = Some(Dialog::Primitive { prim: k.default_primitive(), place: None });
                 self.invalidate_view();
             }
             Action::SetTool(tool) => {
                 if tool.is_sketch() && self.sketch.is_none() {
                     return;
+                }
+                if tool == Tool::EditMesh && self.sketch.is_some() {
+                    return;
+                }
+                if tool != Tool::EditMesh {
+                    self.medit.sel = None;
+                    self.medit.hover = None;
                 }
                 if let Some(sess) = &mut self.sketch {
                     sess.reset_op();
@@ -797,9 +811,10 @@ impl State {
         Mat4::translation(t)
     }
 
-    pub fn create_primitive(&mut self, prim: Primitive) {
+    pub fn create_primitive(&mut self, prim: Primitive, place: Option<super::snap::ModelSnap>) {
         let mesh = prim.build();
-        let tf = self.placement_for(&mesh);
+        let tf = self.primitive_placement(&mesh, place);
+        self.snap_hover = None;
         let mut b = Body::new(self.unique_name(State::primitive_name(&prim)), mesh);
         b.primitive = Some(prim);
         b.transform = tf;
@@ -1043,24 +1058,6 @@ impl State {
         self.toast(format!("{} → {} {}", super::view::fmt_count(before), super::view::fmt_count(after), t("треуг.", "tris")), false);
         self.invalidate_view();
     }
-}
-
-/// Запуск ещё одного экземпляра программы — новое окно со своим проектом.
-///
-/// Отдельный процесс надёжнее нескольких окон в одном: проекты полностью
-/// независимы, а сбой в одном окне не затрагивает другие.
-pub fn spawn_new_window() -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    // macOS: внутри .app запускаем через `open -n`, чтобы окно получило фокус
-    // и корректно отображалось в Dock.
-    if cfg!(target_os = "macos") {
-        let s = exe.to_string_lossy();
-        if let Some(pos) = s.find(".app/Contents/MacOS/") {
-            let bundle = &s[..pos + 4];
-            return std::process::Command::new("/usr/bin/open").arg("-n").arg(bundle).spawn().map(|_| ()).map_err(|e| e.to_string());
-        }
-    }
-    std::process::Command::new(exe).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Запись меша в файл экспорта.

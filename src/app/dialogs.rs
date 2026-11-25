@@ -16,7 +16,9 @@ use std::hash::{Hash, Hasher};
 /// Открытый диалог.
 #[derive(Clone, Debug)]
 pub enum Dialog {
-    Primitive { prim: Primitive },
+    /// Новое тело-примитив. `place` — указанная щелчком точка; пока её нет,
+    /// тело следует за курсором (с привязкой к модели и сетке).
+    Primitive { prim: Primitive, place: Option<super::snap::ModelSnap> },
     /// Выбор плоскости эскиза; `offset` — смещение вдоль нормали.
     SketchPlane { offset: f32 },
     Extrude { sketch: u64, distance: f32, symmetric: bool, op: usize, target: u64 },
@@ -170,7 +172,7 @@ impl Dialog {
     pub fn preview_key(&self, st: &State) -> Option<u64> {
         let mut h = DefaultHasher::new();
         match self {
-            Dialog::Primitive { prim } => (format!("p{prim:?}"), st.scene.revision).hash(&mut h),
+            Dialog::Primitive { prim, place } => (format!("p{prim:?}{place:?}{:?}", place.or(st.snap_hover)), st.scene.revision).hash(&mut h),
             Dialog::Extrude { sketch, distance, symmetric, .. } => {
                 (sketch, distance.to_bits(), symmetric).hash(&mut h);
                 st.scene.revision.hash(&mut h);
@@ -202,9 +204,9 @@ impl Dialog {
     /// Меш предпросмотра и его трансформация.
     pub fn build_preview(&self, st: &State) -> Option<(Mesh, Mat4)> {
         match self {
-            Dialog::Primitive { prim } => {
+            Dialog::Primitive { prim, place } => {
                 let m = prim.build();
-                let tf = st.placement_for(&m);
+                let tf = st.primitive_placement(&m, *place);
                 Some((m, tf))
             }
             Dialog::Extrude { sketch, distance, symmetric, .. } => {
@@ -372,8 +374,8 @@ impl State {
         let area = self.layout.right;
         let row = 30.0 * s;
         let (title, icon, rows): (String, Icon, f32) = match &d {
-            Dialog::Primitive { prim } => (State::primitive_name(prim).to_string(), prim_icon(prim), prim_param_count(prim) as f32 + 1.0),
-            Dialog::SketchPlane { .. } => (t("Создать эскиз", "Create sketch").into(), Icon::Sketch, 6.0),
+            Dialog::Primitive { prim, .. } => (State::primitive_name(prim).to_string(), prim_icon(prim), prim_param_count(prim) as f32 + 2.6),
+            Dialog::SketchPlane { .. } => (t("Создать эскиз", "Create sketch").into(), Icon::Sketch, 8.6),
             Dialog::Extrude { op, .. } => (t("Выдавить", "Extrude").into(), Icon::Extrude, if *op == 0 { 5.0 } else { 6.0 }),
             Dialog::Combine { .. } => (t("Объединить", "Combine").into(), Icon::Union, 5.5),
             Dialog::Mirror { .. } => (t("Зеркало", "Mirror").into(), Icon::Mirror, 3.5),
@@ -414,9 +416,26 @@ impl State {
         let solids = self.solid_ids();
 
         match &mut d {
-            Dialog::Primitive { prim } => {
-                ui.text_in(Rect::new(x0, y, w0, 20.0 * s), t("Тело встанет на плоскость XY рядом с моделью", "Placed on the XY plane next to the model"), 11.5, theme::TEXT_DIM(), 0);
+            Dialog::Primitive { prim, place } => {
+                let (l1, l2) = match place {
+                    Some(sn) => (
+                        format!("{} {}: {}", t("Точка указана", "Point set"), sn.kind.label(), fmt_vec(sn.point)),
+                        t("Щелчок в виде — снова за курсором", "Click the view to move it again").to_string(),
+                    ),
+                    None => (
+                        t("Тело следует за курсором — щёлкните точку", "The body follows the cursor — click a point").to_string(),
+                        t("Привязка: вершины, рёбра, грани, сетка", "Snaps to vertices, edges, faces, grid").to_string(),
+                    ),
+                };
+                ui.text_in(Rect::new(x0, y, w0, 20.0 * s), &l1, 11.5, if place.is_some() { theme::ACCENT() } else { theme::TEXT() }, 0);
+                y += 22.0 * s;
+                ui.text_in(Rect::new(x0, y, w0, 20.0 * s), &l2, 11.0, theme::TEXT_DIM(), 0);
+                y += 22.0 * s;
+                if place.is_none() {
+                    ui.text_in(Rect::new(x0, y, w0, 20.0 * s), t("Shift — без привязки", "Shift — no snapping"), 11.0, theme::TEXT_DIM(), 0);
+                }
                 y += row;
+                self.invalidate_view();
                 edit_primitive(ui, prim, x0, &mut y, w0, row, "dlg_prim");
             }
             Dialog::SketchPlane { offset } => {
@@ -428,25 +447,30 @@ impl State {
                 y += row;
                 let off = *offset;
                 let planes = [
-                    (crate::sketch::SketchPlane::Xy, t("XY — вид сверху", "XY — top")),
-                    (crate::sketch::SketchPlane::Xz, t("XZ — вид спереди", "XZ — front")),
-                    (crate::sketch::SketchPlane::Yz, t("YZ — вид справа", "YZ — right")),
+                    (Some(crate::sketch::SketchPlane::Xy), t("XY — вид сверху", "XY — top"), Icon::Plane),
+                    (Some(crate::sketch::SketchPlane::Xz), t("XZ — вид спереди", "XZ — front"), Icon::Plane),
+                    (Some(crate::sketch::SketchPlane::Yz), t("YZ — вид справа", "YZ — right"), Icon::Plane),
+                    (None, t("По текущему виду", "Current view"), Icon::ViewPlane),
                 ];
-                for (i, (pl, name)) in planes.iter().enumerate() {
+                for (i, (pl, name, icon)) in planes.iter().enumerate() {
                     let br = Rect::new(x0, y, w0, 34.0 * s);
                     let id = crate::ui::id_idx(id_of("dlg_plane"), i);
                     let (hov, _, clicked) = ui.interact(id, br);
                     ui.fb.fill_rounded(br, 4.0 * s, if hov { theme::HOVER() } else { theme::FIELD() });
                     ui.fb.stroke_rounded(br, 4.0 * s, 1.0, if hov { theme::ACCENT() } else { theme::FIELD_BORDER() });
-                    ui.icon(Icon::Plane, Rect::new(br.x + 8.0 * s, br.y + 5.0 * s, 24.0 * s, 24.0 * s), theme::TEXT());
+                    ui.icon(*icon, Rect::new(br.x + 8.0 * s, br.y + 5.0 * s, 24.0 * s, 24.0 * s), theme::TEXT());
                     ui.text_in(Rect::new(br.x + 40.0 * s, br.y, br.w - 44.0 * s, br.h), name, 12.5, theme::TEXT(), 0);
                     if clicked {
-                        let plane = crate::sketch::SketchPlane::offset(*pl, off);
+                        let plane = match pl {
+                            Some(pl) => crate::sketch::SketchPlane::offset(*pl, off),
+                            None => self.view_sketch_plane(off),
+                        };
                         self.begin_sketch(plane, None);
                         return;
                     }
                     y += 40.0 * s;
                 }
+                ui.text_in(Rect::new(x0, y, w0, 20.0 * s), t("…или щёлкните грань модели в виде", "…or click a model face in the view"), 11.5, theme::TEXT_DIM(), 0);
             }
             Dialog::Extrude { sketch, distance, symmetric, op, target } => {
                 let sketches: Vec<(u64, String)> = self.scene.bodies.iter().filter(|b| b.sketch.is_some()).map(|b| (b.id, b.name.clone())).collect();
@@ -733,8 +757,8 @@ impl State {
     /// Применение диалога. Возвращает `true`, если диалог нужно закрыть.
     fn apply_dialog(&mut self, d: &Dialog) -> bool {
         match d {
-            Dialog::Primitive { prim } => {
-                self.create_primitive(*prim);
+            Dialog::Primitive { prim, place } => {
+                self.create_primitive(*prim, *place);
                 true
             }
             Dialog::Extrude { sketch, distance, symmetric, op, target } => self.do_extrude(*sketch, *distance, *symmetric, *op, *target),
@@ -940,8 +964,8 @@ impl State {
                 let col_w = w0 * 0.5;
                 let items: [(&str, &str); 20] = [
                     ("Ctrl+N / O / S", t("Новый / открыть / сохранить", "New / open / save")),
-                    ("Ctrl+I", t("Импорт модели в проект", "Import a model")),
-                    ("Ctrl+E", t("Экспорт STL", "Export STL")),
+                    ("Ctrl+I, Ctrl+E", t("Импорт, экспорт STL", "Import, export STL")),
+                    ("Ctrl+T / W", t("Новая / закрыть вкладку", "New / close tab")),
                     ("Ctrl+Z / Ctrl+Y", t("Отменить / повторить", "Undo / redo")),
                     ("Ctrl+D, Del", t("Дублировать, удалить", "Duplicate, delete")),
                     ("F, Home", t("Вписать, начальный вид", "Fit, home view")),
@@ -1046,10 +1070,7 @@ impl State {
                                 self.saved_revision = self.scene.revision;
                                 self.run_action(a);
                             }
-                            None => {
-                                self.cfg.save();
-                                self.quit = true;
-                            }
+                            None => self.request_quit(),
                         }
                     }
                 }
@@ -1061,8 +1082,9 @@ impl State {
                             self.run_action(a);
                         }
                         None => {
-                            self.cfg.save();
-                            self.quit = true;
+                            // Выход: проверить остальные вкладки.
+                            self.saved_revision = self.scene.revision;
+                            self.request_quit();
                         }
                     }
                 }
@@ -1104,6 +1126,11 @@ fn wrap(ui: &Ui, text: &str, size: f32, w: f32) -> Vec<String> {
         out.push(line);
     }
     out
+}
+
+/// Короткая запись точки: (x; y; z).
+pub fn fmt_vec(p: crate::math::Vec3) -> String {
+    format!("({}; {}; {})", crate::ui::fmt_num(p.x), crate::ui::fmt_num(p.y), crate::ui::fmt_num(p.z))
 }
 
 pub fn prim_icon(p: &Primitive) -> Icon {
