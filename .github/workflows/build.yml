@@ -167,7 +167,9 @@ jobs:
           ln -s /Applications target/dmg/Applications
           mkdir -p target/dmg/.background
           cp installer/macos/dmg-background.png target/dmg/.background/background.png
-          hdiutil create -volname "AlphaCad" -srcfolder target/dmg -ov -format UDRW -fs HFS+ target/rw.dmg
+          # hdiutil на раннерах иногда отвечает «Resource busy» (код 16) — повторяем.
+          retry() { for n in 1 2 3 4 5; do "$@" && return 0; echo "::warning::retry $n: $*"; sleep $((n * 5)); done; return 1; }
+          retry hdiutil create -volname "AlphaCad" -srcfolder target/dmg -ov -format UDRW -fs HFS+ target/rw.dmg
           DEV=$(hdiutil attach -readwrite -noverify -noautoopen target/rw.dmg | grep -E '^/dev/' | head -1 | awk '{print $1}')
           sleep 2
           perl -e 'alarm 120; exec @ARGV' osascript <<'OSA' || echo "::warning::Finder layout skipped"
@@ -195,8 +197,9 @@ jobs:
           OSA
           chmod -Rf go-w /Volumes/AlphaCad || true
           sync
-          hdiutil detach "$DEV" || hdiutil detach "$DEV" -force
-          hdiutil convert target/rw.dmg -format UDZO -imagekey zlib-level=9 -o "target/out/AlphaCad-$VER-macos-universal.dmg"
+          retry hdiutil detach "$DEV" || hdiutil detach "$DEV" -force
+          sleep 2
+          retry hdiutil convert -ov target/rw.dmg -format UDZO -imagekey zlib-level=9 -o "target/out/AlphaCad-$VER-macos-universal.dmg"
           ls -la target/out
       - uses: actions/upload-artifact@v4
         with:
