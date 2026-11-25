@@ -79,8 +79,21 @@ pub enum Action {
     EditSketch,
     Extrude,
     SketchUndo,
+    /// Завершить многошаговую операцию эскиза (сплайн).
+    SketchCommit,
     FinishSketch,
     CancelSketch,
+    Revolve,
+    Sweep,
+    Loft,
+    Shell,
+    Solidify,
+    Pattern,
+    /// Деформация: 0 — скручивание, 1 — сужение, 2 — изгиб.
+    Deform(u8),
+    Subdivide,
+    Smooth,
+    Coil,
     Weld,
     FixOrientation,
     FlipNormals,
@@ -246,8 +259,7 @@ impl State {
                     return;
                 }
                 if let Some(sess) = &mut self.sketch {
-                    sess.anchor = None;
-                    sess.chain_start = None;
+                    sess.reset_op();
                 }
                 self.tool = tool;
                 self.measure = Default::default();
@@ -298,7 +310,7 @@ impl State {
             Action::NewSketch => {
                 if self.sketch.is_none() {
                     self.tab = Tab::Sketch;
-                    self.dialog = Some(Dialog::SketchPlane);
+                    self.dialog = Some(Dialog::SketchPlane { offset: 0.0 });
                 }
             }
             Action::EditSketch => {
@@ -320,17 +332,82 @@ impl State {
                 self.dialog = Some(Dialog::Extrude { sketch, distance: 10.0, symmetric: false, op: 0, target: 0 });
                 self.invalidate_view();
             }
+            Action::Revolve | Action::Sweep | Action::Loft => {
+                if self.sketch.is_some() {
+                    self.finish_sketch();
+                }
+                let sketches: Vec<u64> = self.scene.bodies.iter().filter(|b| b.sketch.is_some()).map(|b| b.id).collect();
+                let with_profile: Vec<u64> = self.scene.bodies.iter().filter(|b| b.sketch.as_ref().map(|s| !s.profiles().is_empty()).unwrap_or(false)).map(|b| b.id).collect();
+                let sel = self.selected_id().filter(|id| with_profile.contains(id));
+                let last = sel.or_else(|| with_profile.last().copied());
+                let Some(profile) = last else {
+                    self.toast(t("Сначала создайте эскиз с замкнутым контуром", "Create a sketch with a closed profile first"), true);
+                    return;
+                };
+                let d = match a {
+                    Action::Revolve => Dialog::Revolve { sketch: profile, angle: 360.0, axis: 1, op: 0, target: 0 },
+                    Action::Sweep => {
+                        // Траектория — другой эскиз, предпочтительно с незамкнутой линией.
+                        let path = sketches
+                            .iter()
+                            .rev()
+                            .copied()
+                            .filter(|i| *i != profile)
+                            .max_by_key(|i| self.scene.body(*i).and_then(|b| b.sketch.as_ref()).map(|s| s.chains().iter().any(|(_, c)| !c)).unwrap_or(false));
+                        let Some(path) = path else {
+                            self.toast(t("Нужны два эскиза: профиль и траектория", "Two sketches are needed: a profile and a path"), true);
+                            return;
+                        };
+                        Dialog::Sweep { profile, path, twist: 0.0, scale: 100.0, op: 0, target: 0 }
+                    }
+                    _ => {
+                        if with_profile.len() < 2 {
+                            self.toast(t("Нужны два эскиза с замкнутыми контурами на разных плоскостях", "Two sketches with closed profiles on different planes are needed"), true);
+                            return;
+                        }
+                        let n = with_profile.len();
+                        Dialog::Loft { a: with_profile[n - 2], b: with_profile[n - 1], c: 0, op: 0, target: 0 }
+                    }
+                };
+                self.tab = Tab::Solid;
+                self.dialog = Some(d);
+                self.invalidate_view();
+            }
+            Action::Shell | Action::Solidify | Action::Pattern | Action::Deform(_) | Action::Subdivide | Action::Smooth => {
+                let Some(id) = self.selected_solid() else {
+                    self.toast(t("Выберите тело", "Select a body"), true);
+                    return;
+                };
+                let size = self.scene.body(id).map(|b| b.world_aabb().size()).unwrap_or(Vec3::new(10.0, 10.0, 10.0));
+                self.dialog = Some(match a {
+                    Action::Shell => Dialog::Shell { id, thickness: 1.0f32.max((size.x.min(size.y).min(size.z) * 0.1 * 2.0).round() / 2.0), outward: false, solidify: false },
+                    Action::Solidify => Dialog::Shell { id, thickness: 1.0, outward: false, solidify: true },
+                    Action::Pattern => Dialog::Pattern { id, circular: false, count: 3.0, spacing: (size.x * 1.5).max(1.0).round(), angle: 360.0, axis: 0, join: false },
+                    Action::Deform(k) => Dialog::Deform { id, kind: k as usize, axis: 2, angle: if k == 2 { 90.0 } else { 90.0 }, scale: 50.0 },
+                    Action::Subdivide => Dialog::Subdivide { id, levels: 2.0, smooth: true },
+                    _ => Dialog::Smooth { id, iterations: 5.0, factor: 0.5, taubin: true },
+                });
+                self.invalidate_view();
+            }
+            Action::Coil => {
+                if self.sketch.is_some() {
+                    return;
+                }
+                self.tab = Tab::Solid;
+                self.dialog = Some(Dialog::Coil { radius: 10.0, pitch: 5.0, turns: 5.0, wire: 1.0 });
+                self.invalidate_view();
+            }
             Action::SketchUndo => {
                 if let Some(sess) = &mut self.sketch {
-                    if sess.anchor.is_some() {
-                        sess.anchor = None;
-                        sess.chain_start = None;
+                    if sess.busy() {
+                        sess.reset_op();
                     } else {
                         sess.sketch.entities.pop();
                     }
                     self.invalidate_view();
                 }
             }
+            Action::SketchCommit => self.sketch_commit(),
             Action::FinishSketch => self.finish_sketch(),
             Action::CancelSketch => {
                 if let Some(sess) = self.sketch.take() {
@@ -697,7 +774,7 @@ impl State {
         }
         self.animate_camera(sess.prev_camera);
         if !empty {
-            self.toast(t("Эскиз готов — нажмите «Выдавить» (E)", "Sketch finished — press Extrude (E)"), false);
+            self.toast(t("Эскиз готов — «Выдавить» (E), «Вращение», «Сдвиг» или «Лофт»", "Sketch finished — Extrude (E), Revolve, Sweep or Loft"), false);
         }
         self.invalidate_view();
     }
@@ -738,14 +815,23 @@ impl State {
             return false;
         };
         m.transform(tf);
+        self.add_feature_body(t("Выдавить", "Extrude"), t("Тело", "Body"), m, op, target, &[sketch])
+    }
+
+    /// Новое тело из операции (меш в мировых координатах) или булева операция
+    /// с телом `target`. Эскизы из `hide` скрываются.
+    pub fn add_feature_body(&mut self, label: &str, name: &str, mut m: Mesh, op: usize, target: u64, hide: &[u64]) -> bool {
         if op == 0 || self.scene.body(target).is_none() {
             m.compute_smooth_normals();
-            let mut b = Body::new(self.unique_name(t("Тело", "Body")), m);
+            let mut b = Body::new(self.unique_name(name), m);
             b.material.shading = 0;
-            self.scene.group(t("Выдавить", "Extrude"), |sc| {
-                sc.set_visible(sketch, false);
-                sc.add_body(b);
+            let id = self.scene.group(label, |sc| {
+                for h in hide {
+                    sc.set_visible(*h, false);
+                }
+                sc.add_body(b)
             });
+            self.scene.selected = Some(id);
             self.invalidate_view();
             return true;
         }
@@ -761,8 +847,10 @@ impl State {
                 nb.transform = Mat4::identity();
                 nb.primitive = None;
                 nb.material.shading = 0;
-                self.scene.group(t("Выдавить", "Extrude"), |sc| {
-                    sc.set_visible(sketch, false);
+                self.scene.group(label, |sc| {
+                    for h in hide {
+                        sc.set_visible(*h, false);
+                    }
                     sc.replace_body(nb);
                 });
                 self.invalidate_view();
@@ -773,6 +861,112 @@ impl State {
                 false
             }
         }
+    }
+
+    /// Применение диалогов моделирования (см. `Dialog::feature_result`).
+    pub fn apply_feature(&mut self, d: &Dialog) -> bool {
+        let started = std::time::Instant::now();
+        let res = match d.feature_result(self) {
+            Some(Ok(r)) => r,
+            Some(Err(e)) => {
+                self.toast(super::dialogs::model_error_text(&e), true);
+                return false;
+            }
+            None => return true,
+        };
+        let (mut m, tf) = res;
+        let ok = match d {
+            Dialog::Revolve { sketch, op, target, .. } => {
+                m.transform(tf);
+                self.add_feature_body(t("Вращение", "Revolve"), t("Тело", "Body"), m, *op, *target, &[*sketch])
+            }
+            Dialog::Sweep { profile, path, op, target, .. } => self.add_feature_body(t("Сдвиг", "Sweep"), t("Тело", "Body"), m, *op, *target, &[*profile, *path]),
+            Dialog::Loft { a, b, c, op, target } => {
+                let hide: Vec<u64> = [*a, *b, *c].into_iter().filter(|x| *x != 0).collect();
+                self.add_feature_body(t("Лофт", "Loft"), t("Тело", "Body"), m, *op, *target, &hide)
+            }
+            Dialog::Coil { .. } => {
+                let mut b = Body::new(self.unique_name(t("Пружина", "Coil")), m);
+                b.transform = tf;
+                let id = self.scene.add_body(b);
+                self.scene.selected = Some(id);
+                true
+            }
+            Dialog::Pattern { id, circular, count, spacing, angle, axis, join } => {
+                let Some(src) = self.scene.body(*id).cloned() else { return false };
+                let tfs = super::dialogs::pattern_transforms(*circular, *count, *spacing, *angle, *axis);
+                if tfs.len() < 2 {
+                    return true;
+                }
+                if *join {
+                    let mut all = src.mesh.clone();
+                    all.transform(src.transform);
+                    all.merge(&m);
+                    all.compute_smooth_normals();
+                    let mut nb = src;
+                    nb.mesh = all;
+                    nb.transform = Mat4::identity();
+                    nb.primitive = None;
+                    self.scene.group(t("Массив", "Pattern"), |sc| sc.replace_body(nb));
+                } else {
+                    let base = base_name(&src.name);
+                    let mut copies: Vec<Body> = Vec::new();
+                    let mut n = 1;
+                    for tf in tfs.into_iter().skip(1) {
+                        // Уникальное имя с учётом существующих тел и уже созданных копий.
+                        let name = loop {
+                            let cand = format!("{base} {n}");
+                            n += 1;
+                            if !self.scene.bodies.iter().any(|b| b.name == cand) && !copies.iter().any(|c| c.name == cand) {
+                                break cand;
+                            }
+                        };
+                        let mut nb = src.clone();
+                        nb.name = name;
+                        nb.transform = tf * src.transform;
+                        copies.push(nb);
+                    }
+                    self.scene.group(t("Массив", "Pattern"), |sc| {
+                        for c in copies {
+                            sc.add_body(c);
+                        }
+                    });
+                }
+                true
+            }
+            Dialog::Shell { id, .. } | Dialog::Deform { id, .. } | Dialog::Subdivide { id, .. } | Dialog::Smooth { id, .. } => {
+                let Some(src) = self.scene.body(*id).cloned() else { return false };
+                m.transform(tf);
+                m.compute_smooth_normals();
+                let before = src.mesh.triangle_count();
+                let after = m.triangle_count();
+                let mut nb = src;
+                nb.mesh = m;
+                nb.transform = Mat4::identity();
+                nb.primitive = None;
+                if matches!(d, Dialog::Subdivide { smooth: true, .. } | Dialog::Smooth { .. } | Dialog::Deform { .. }) {
+                    nb.material.shading = 1;
+                }
+                let label = match d {
+                    Dialog::Shell { solidify: true, .. } => t("Толщина", "Solidify"),
+                    Dialog::Shell { .. } => t("Оболочка", "Shell"),
+                    Dialog::Deform { .. } => t("Деформация", "Deform"),
+                    Dialog::Subdivide { .. } => t("Подразделить", "Subdivide"),
+                    _ => t("Сгладить", "Smooth"),
+                };
+                self.scene.group(label, |sc| sc.replace_body(nb));
+                if before != after {
+                    self.toast(format!("{} → {} {}", super::view::fmt_count(before), super::view::fmt_count(after), t("треуг.", "tris")), false);
+                }
+                true
+            }
+            _ => true,
+        };
+        if ok && started.elapsed().as_millis() > 300 {
+            self.toast(format!("{} ({} ms)", t("Готово", "Done"), started.elapsed().as_millis()), false);
+        }
+        self.invalidate_view();
+        ok
     }
 
     pub fn do_combine(&mut self, target: u64, tool: u64, op: BoolOp, keep: bool) -> bool {

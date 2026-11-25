@@ -17,11 +17,30 @@ use std::hash::{Hash, Hasher};
 #[derive(Clone, Debug)]
 pub enum Dialog {
     Primitive { prim: Primitive },
-    SketchPlane,
+    /// Выбор плоскости эскиза; `offset` — смещение вдоль нормали.
+    SketchPlane { offset: f32 },
     Extrude { sketch: u64, distance: f32, symmetric: bool, op: usize, target: u64 },
     Combine { target: u64, tool: u64, op: usize, keep: bool },
     Mirror { plane: usize, copy: bool },
     Reduce { id: u64, percent: f32 },
+    /// Вращение профиля. `axis`: 0 — X эскиза, 1 — Y эскиза, 2 — отрезок эскиза.
+    Revolve { sketch: u64, angle: f32, axis: usize, op: usize, target: u64 },
+    /// Сдвиг профиля по траектории другого эскиза.
+    Sweep { profile: u64, path: u64, twist: f32, scale: f32, op: usize, target: u64 },
+    /// Лофт через 2–3 сечения (`c == 0` — без третьего).
+    Loft { a: u64, b: u64, c: u64, op: usize, target: u64 },
+    /// Оболочка (Fusion) / толщина (Blender Solidify).
+    Shell { id: u64, thickness: f32, outward: bool, solidify: bool },
+    /// Массив: линейный или круговой.
+    Pattern { id: u64, circular: bool, count: f32, spacing: f32, angle: f32, axis: usize, join: bool },
+    /// Деформация: 0 — скручивание, 1 — сужение, 2 — изгиб.
+    Deform { id: u64, kind: usize, axis: usize, angle: f32, scale: f32 },
+    /// Подразделение поверхности.
+    Subdivide { id: u64, levels: f32, smooth: bool },
+    /// Сглаживание вершин.
+    Smooth { id: u64, iterations: f32, factor: f32, taubin: bool },
+    /// Пружина.
+    Coil { radius: f32, pitch: f32, turns: f32, wire: f32 },
     Info { id: u64 },
     Settings,
     Help,
@@ -38,7 +57,113 @@ enum Outcome {
 impl Dialog {
     /// Диалог отображается в боковой панели (не модальный).
     pub fn is_side_panel(&self) -> bool {
-        matches!(self, Dialog::Primitive { .. } | Dialog::SketchPlane | Dialog::Extrude { .. } | Dialog::Combine { .. } | Dialog::Mirror { .. } | Dialog::Reduce { .. })
+        !matches!(self, Dialog::Info { .. } | Dialog::Settings | Dialog::Help | Dialog::ConfirmQuit | Dialog::ConfirmDiscard { .. } | Dialog::Message { .. })
+    }
+
+    /// Диалог операции моделирования (см. [`Dialog::feature_result`]).
+    pub fn is_feature(&self) -> bool {
+        matches!(
+            self,
+            Dialog::Revolve { .. } | Dialog::Sweep { .. } | Dialog::Loft { .. } | Dialog::Shell { .. } | Dialog::Pattern { .. } | Dialog::Deform { .. } | Dialog::Subdivide { .. } | Dialog::Smooth { .. } | Dialog::Coil { .. }
+        )
+    }
+
+    /// Тело, которое диалог изменяет на месте (скрывается на время предпросмотра).
+    pub fn hides_body(&self) -> Option<u64> {
+        match self {
+            Dialog::Shell { id, .. } | Dialog::Deform { id, .. } | Dialog::Subdivide { id, .. } | Dialog::Smooth { id, .. } => Some(*id),
+            _ => None,
+        }
+    }
+
+    /// Результат операций моделирования (Revolve, Sweep, Loft, Shell, Pattern,
+    /// деформации, подразделение, сглаживание, пружина): меш и его трансформация.
+    /// `None` — диалог не из этого семейства.
+    pub fn feature_result(&self, st: &State) -> Option<Result<(Mesh, Mat4), String>> {
+        use crate::modeling as md;
+        let world_of = |id: u64| -> Result<Mesh, String> {
+            let b = st.scene.body(id).ok_or_else(|| "выберите тело".to_string())?;
+            if b.mesh.is_empty() {
+                return Err("выберите тело".into());
+            }
+            let mut m = b.mesh.clone();
+            m.transform(b.transform);
+            Ok(m)
+        };
+        let sketch_of = |id: u64| -> Result<(&crate::sketch::Sketch, Mat4), String> {
+            let b = st.scene.body(id).ok_or_else(|| "выберите эскиз".to_string())?;
+            b.sketch.as_ref().map(|s| (s, b.transform)).ok_or_else(|| "выберите эскиз".to_string())
+        };
+        let id = Mat4::identity();
+        Some(match self {
+            Dialog::Revolve { sketch, angle, axis, .. } => (|| {
+                let (sk, tf) = sketch_of(*sketch)?;
+                let ax = md::sketch_axis(sk, *axis).ok_or_else(|| "в эскизе нет отдельного отрезка для оси".to_string())?;
+                md::revolve(sk, ax, *angle).map(|m| (m, tf))
+            })(),
+            Dialog::Sweep { profile, path, twist, scale, .. } => (|| {
+                if profile == path {
+                    return Err("профиль и траектория должны быть разными эскизами".into());
+                }
+                let (sk, tf) = sketch_of(*profile)?;
+                let (pk, ptf) = sketch_of(*path)?;
+                let (pts, closed) = pk.longest_path().ok_or_else(|| "в эскизе траектории нет линий".to_string())?;
+                let world: Vec<crate::math::Vec3> = pts.iter().map(|p| ptf.transform_point(pk.plane.to_world(*p))).collect();
+                md::sweep(sk, tf, &world, closed, *twist, scale / 100.0).map(|m| (m, id))
+            })(),
+            Dialog::Loft { a, b, c, .. } => (|| {
+                let mut secs = Vec::new();
+                for sid in [*a, *b, *c] {
+                    if sid == 0 {
+                        continue;
+                    }
+                    let (sk, tf) = sketch_of(sid)?;
+                    secs.push(md::sketch_section(sk, tf).ok_or_else(|| "в одном из эскизов нет замкнутого контура".to_string())?);
+                }
+                if [*a, *b, *c].iter().filter(|x| **x != 0).collect::<std::collections::HashSet<_>>().len() != secs.len() {
+                    return Err("сечения должны быть разными эскизами".into());
+                }
+                md::loft(&secs).map(|m| (m, id))
+            })(),
+            Dialog::Shell { id: bid, thickness, outward, .. } => world_of(*bid).and_then(|m| md::solidify(&m, if *outward { -thickness } else { *thickness }).map(|m| (m, id))),
+            Dialog::Pattern { id: bid, circular, count, spacing, angle, axis, .. } => world_of(*bid).map(|m| {
+                let mut out = Mesh::new();
+                for tf in pattern_transforms(*circular, *count, *spacing, *angle, *axis).into_iter().skip(1) {
+                    let mut c = m.clone();
+                    c.transform(tf);
+                    out.merge(&c);
+                }
+                out.compute_smooth_normals();
+                (out, id)
+            }),
+            Dialog::Deform { id: bid, kind, axis, angle, scale } => world_of(*bid).map(|m| {
+                let size = m.aabb().size();
+                let dense = md::refine(&m, size.x.max(size.y).max(size.z) / 40.0, 400_000);
+                let (k, amount) = match kind {
+                    0 => (md::DeformKind::Twist, *angle),
+                    1 => (md::DeformKind::Taper, scale / 100.0),
+                    _ => (md::DeformKind::Bend, *angle),
+                };
+                (md::deform(&dense, k, *axis, amount), id)
+            }),
+            Dialog::Subdivide { id: bid, levels, smooth } => world_of(*bid).and_then(|m| {
+                let lv = levels.round().clamp(1.0, 4.0) as u32;
+                if m.triangle_count().saturating_mul(4usize.pow(lv)) > 2_000_000 {
+                    return Err("слишком много треугольников — уменьшите число уровней".into());
+                }
+                let mut r = m;
+                for _ in 0..lv {
+                    r = md::subdivide(&r, *smooth);
+                }
+                Ok((r, id))
+            }),
+            Dialog::Smooth { id: bid, iterations, factor, taubin } => world_of(*bid).map(|m| (md::smooth(&m, iterations.round().clamp(1.0, 200.0) as usize, *factor, *taubin), id)),
+            Dialog::Coil { radius, pitch, turns, wire } => md::coil(*radius, *pitch, *turns, *wire).map(|m| {
+                let tf = st.placement_for(&m);
+                (m, tf)
+            }),
+            _ => return None,
+        })
     }
 
     /// Ключ предпросмотра (изменение — пересчёт меша предпросмотра).
@@ -52,6 +177,22 @@ impl Dialog {
             }
             Dialog::Mirror { plane, .. } => {
                 ("m", plane, st.scene.selected, st.scene.revision).hash(&mut h);
+            }
+            Dialog::Revolve { .. } | Dialog::Sweep { .. } | Dialog::Loft { .. } | Dialog::Shell { .. } | Dialog::Pattern { .. } | Dialog::Deform { .. } | Dialog::Subdivide { .. } | Dialog::Smooth { .. } | Dialog::Coil { .. } => {
+                // Операция и тело-цель на результат не влияют.
+                let mut d = self.clone();
+                match &mut d {
+                    Dialog::Revolve { op, target, .. } | Dialog::Sweep { op, target, .. } | Dialog::Loft { op, target, .. } => {
+                        *op = 0;
+                        *target = 0;
+                    }
+                    Dialog::Pattern { join, .. } => *join = false,
+                    _ => {}
+                }
+                (format!("{d:?}"), st.scene.revision).hash(&mut h);
+                if matches!(d, Dialog::Coil { .. }) {
+                    st.scene.bodies.len().hash(&mut h);
+                }
             }
             _ => return None,
         }
@@ -77,9 +218,82 @@ impl Dialog {
                 }
                 Some((mirrored_world(&b.mesh, b.transform, *plane), Mat4::identity()))
             }
-            _ => None,
+            _ => {
+                let key = self.preview_key(st).unwrap_or(0);
+                match self.feature_result(st)? {
+                    Ok(r) => {
+                        *st.preview_error.borrow_mut() = None;
+                        Some(r)
+                    }
+                    Err(e) => {
+                        *st.preview_error.borrow_mut() = Some((key, e));
+                        None
+                    }
+                }
+            }
         }
     }
+}
+
+/// Трансформации копий массива (первая — исходное положение).
+pub fn pattern_transforms(circular: bool, count: f32, spacing: f32, angle: f32, axis: usize) -> Vec<Mat4> {
+    let n = count.round().clamp(1.0, 500.0) as usize;
+    let dir = match axis {
+        0 => crate::math::Vec3::new(1.0, 0.0, 0.0),
+        1 => crate::math::Vec3::new(0.0, 1.0, 0.0),
+        _ => crate::math::Vec3::new(0.0, 0.0, 1.0),
+    };
+    (0..n)
+        .map(|i| {
+            if circular {
+                // Полный круг — копии без повтора первой; иначе — включая конец дуги.
+                let full = (angle.abs() - 360.0).abs() < 1e-3;
+                let step = if full || n < 2 { angle / n as f32 } else { angle / (n - 1) as f32 };
+                Mat4::rotation_axis(dir, (step * i as f32) * crate::math::DEG2RAD)
+            } else {
+                Mat4::translation(dir * (spacing * i as f32))
+            }
+        })
+        .collect()
+}
+
+/// Перевод сообщений об ошибках моделирования.
+pub fn model_error_text(e: &str) -> String {
+    if !super::lang_en() {
+        let mut c = e.chars();
+        return match c.next() {
+            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+            None => String::new(),
+        };
+    }
+    match e {
+        "в эскизе нет замкнутого контура" => "The sketch has no closed profile",
+        "угол должен быть больше нуля" => "The angle must be non-zero",
+        "профиль пересекает ось вращения" => "The profile crosses the rotation axis",
+        "не удалось построить тело" => "Could not build the body",
+        "в эскизе профиля нет замкнутого контура" => "The profile sketch has no closed profile",
+        "траектория слишком короткая" => "The path is too short",
+        "плоскость профиля должна пересекать траекторию поперёк" => "The profile plane must cross the path",
+        "нужно минимум два сечения" => "At least two sections are required",
+        "каждое сечение должно быть замкнутым контуром" => "Every section must be a closed profile",
+        "сечения лежат в одном месте — разнесите их по высоте" => "Sections coincide — move them apart",
+        "толщина должна быть больше нуля" => "Thickness must be positive",
+        "пустая сетка" => "Empty mesh",
+        "параметры должны быть больше нуля" => "Parameters must be positive",
+        "радиус проволоки должен быть меньше радиуса витка" => "Wire radius must be smaller than the coil radius",
+        "шаг меньше толщины проволоки — витки пересекаются" => "Pitch is smaller than the wire — turns overlap",
+        "не удалось построить пружину" => "Could not build the coil",
+        "выберите тело" => "Select a body",
+        "выберите эскиз" => "Select a sketch",
+        "в эскизе нет отдельного отрезка для оси" => "The sketch has no standalone line for the axis",
+        "профиль и траектория должны быть разными эскизами" => "Profile and path must be different sketches",
+        "в эскизе траектории нет линий" => "The path sketch has no curves",
+        "в одном из эскизов нет замкнутого контура" => "One of the sketches has no closed profile",
+        "сечения должны быть разными эскизами" => "Sections must be different sketches",
+        "слишком много треугольников — уменьшите число уровней" => "Too many triangles — use fewer levels",
+        other => other,
+    }
+    .to_string()
 }
 
 /// Меш выдавливания эскиза (в локальных координатах тела-эскиза) и трансформация тела.
@@ -118,6 +332,30 @@ impl State {
         self.scene.bodies.iter().filter(|b| !b.mesh.is_empty()).map(|b| (b.id, b.name.clone())).collect()
     }
 
+    fn sketch_ids(&self) -> Vec<(u64, String)> {
+        self.scene.bodies.iter().filter(|b| b.sketch.is_some()).map(|b| (b.id, b.name.clone())).collect()
+    }
+
+    /// Строки «Операция» и «Тело» для операций, создающих тело.
+    #[allow(clippy::too_many_arguments)]
+    fn op_rows(ui: &mut Ui, x0: f32, y: &mut f32, w0: f32, row: f32, solids: &[(u64, String)], op: &mut usize, target: &mut u64, key: &str) {
+        let s = ui.s;
+        let fr = ui.labeled(Rect::new(x0, *y, w0, 26.0 * s), t("Операция", "Operation"), 100.0);
+        let mut o = *op;
+        if ui.segmented(id_of(&format!("{key}_op")), fr, &[t("Новое", "New"), t("Соед.", "Join"), t("Вырез.", "Cut"), t("Перес.", "Inter.")], &mut o) {
+            *op = if solids.is_empty() { 0 } else { o };
+        }
+        *y += row;
+        if *op != 0 {
+            if !solids.iter().any(|(i, _)| i == target) {
+                *target = solids.first().map(|(i, _)| *i).unwrap_or(0);
+            }
+            let fr = ui.labeled(Rect::new(x0, *y, w0, 26.0 * s), t("Тело", "Body"), 100.0);
+            State::body_combo(ui, id_of(&format!("{key}_target")), fr, solids, target);
+            *y += row;
+        }
+    }
+
     fn body_combo(ui: &mut Ui, id: u64, r: Rect, list: &[(u64, String)], cur: &mut u64) -> bool {
         let names: Vec<String> = list.iter().map(|(_, n)| n.clone()).collect();
         let mut idx = list.iter().position(|(i, _)| i == cur).unwrap_or(0);
@@ -135,11 +373,24 @@ impl State {
         let row = 30.0 * s;
         let (title, icon, rows): (String, Icon, f32) = match &d {
             Dialog::Primitive { prim } => (State::primitive_name(prim).to_string(), prim_icon(prim), prim_param_count(prim) as f32 + 1.0),
-            Dialog::SketchPlane => (t("Создать эскиз", "Create sketch").into(), Icon::Sketch, 5.0),
+            Dialog::SketchPlane { .. } => (t("Создать эскиз", "Create sketch").into(), Icon::Sketch, 6.0),
             Dialog::Extrude { op, .. } => (t("Выдавить", "Extrude").into(), Icon::Extrude, if *op == 0 { 5.0 } else { 6.0 }),
             Dialog::Combine { .. } => (t("Объединить", "Combine").into(), Icon::Union, 5.5),
             Dialog::Mirror { .. } => (t("Зеркало", "Mirror").into(), Icon::Mirror, 3.5),
             Dialog::Reduce { .. } => (t("Упростить сетку", "Reduce mesh").into(), Icon::Reduce, 4.0),
+            Dialog::Revolve { op, .. } => (t("Вращение", "Revolve").into(), Icon::Revolve, if *op == 0 { 6.0 } else { 7.0 }),
+            Dialog::Sweep { op, .. } => (t("Сдвиг по траектории", "Sweep").into(), Icon::Sweep, if *op == 0 { 7.0 } else { 8.0 }),
+            Dialog::Loft { op, .. } => (t("Лофт", "Loft").into(), Icon::Loft, if *op == 0 { 6.0 } else { 7.0 }),
+            Dialog::Shell { solidify, .. } => (if *solidify { t("Толщина", "Solidify") } else { t("Оболочка", "Shell") }.into(), if *solidify { Icon::Solidify } else { Icon::Shell }, 5.0),
+            Dialog::Pattern { .. } => (t("Массив", "Pattern").into(), Icon::Pattern, 7.0),
+            Dialog::Deform { kind, .. } => (
+                [t("Скручивание", "Twist"), t("Сужение", "Taper"), t("Изгиб", "Bend")][(*kind).min(2)].into(),
+                [Icon::Twist, Icon::Taper, Icon::Bend][(*kind).min(2)],
+                5.0,
+            ),
+            Dialog::Subdivide { .. } => (t("Подразделить", "Subdivide").into(), Icon::Subdivide, 4.5),
+            Dialog::Smooth { .. } => (t("Сгладить", "Smooth").into(), Icon::Smooth, 5.0),
+            Dialog::Coil { .. } => (t("Пружина", "Coil").into(), Icon::Coil, 6.0),
             _ => (String::new(), Icon::Info, 2.0),
         };
         let h = 40.0 * s + rows * row + 56.0 * s;
@@ -168,10 +419,14 @@ impl State {
                 y += row;
                 edit_primitive(ui, prim, x0, &mut y, w0, row, "dlg_prim");
             }
-            Dialog::SketchPlane => {
+            Dialog::SketchPlane { offset } => {
                 show_ok = false;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Смещение", "Offset"), 100.0);
+                ui.number_field(id_of("dlg_plane_off"), fr, offset, t("мм", "mm"), 5.0, -1e5, 1e5);
+                y += row;
                 ui.text_in(Rect::new(x0, y, w0, 20.0 * s), t("Выберите плоскость эскиза:", "Choose the sketch plane:"), 12.0, theme::TEXT(), 0);
                 y += row;
+                let off = *offset;
                 let planes = [
                     (crate::sketch::SketchPlane::Xy, t("XY — вид сверху", "XY — top")),
                     (crate::sketch::SketchPlane::Xz, t("XZ — вид спереди", "XZ — front")),
@@ -186,7 +441,7 @@ impl State {
                     ui.icon(Icon::Plane, Rect::new(br.x + 8.0 * s, br.y + 5.0 * s, 24.0 * s, 24.0 * s), theme::TEXT());
                     ui.text_in(Rect::new(br.x + 40.0 * s, br.y, br.w - 44.0 * s, br.h), name, 12.5, theme::TEXT(), 0);
                     if clicked {
-                        let plane = *pl;
+                        let plane = crate::sketch::SketchPlane::offset(*pl, off);
                         self.begin_sketch(plane, None);
                         return;
                     }
@@ -268,7 +523,181 @@ impl State {
                 y += row;
                 ok_label = t("Упростить", "Reduce");
             }
+            Dialog::Revolve { sketch, angle, axis, op, target } => {
+                let sketches = self.sketch_ids();
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Профиль", "Profile"), 100.0);
+                State::body_combo(ui, id_of("dlg_rv_sketch"), fr, &sketches, sketch);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Ось", "Axis"), 100.0);
+                ui.segmented(id_of("dlg_rv_axis"), fr, &["X", "Y", t("Отрезок", "Line")], axis);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Угол", "Angle"), 100.0);
+                ui.number_field(id_of("dlg_rv_angle"), fr, angle, "°", 15.0, -360.0, 360.0);
+                y += row;
+                Self::op_rows(ui, x0, &mut y, w0, row, &solids, op, target, "dlg_rv");
+            }
+            Dialog::Sweep { profile, path, twist, scale, op, target } => {
+                let sketches = self.sketch_ids();
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Профиль", "Profile"), 100.0);
+                State::body_combo(ui, id_of("dlg_sw_prof"), fr, &sketches, profile);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Траектория", "Path"), 100.0);
+                State::body_combo(ui, id_of("dlg_sw_path"), fr, &sketches, path);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Закрутка", "Twist"), 100.0);
+                ui.number_field(id_of("dlg_sw_twist"), fr, twist, "°", 15.0, -3600.0, 3600.0);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Масштаб конца", "End scale"), 100.0);
+                ui.number_field(id_of("dlg_sw_scale"), fr, scale, "%", 10.0, 1.0, 1000.0);
+                y += row;
+                Self::op_rows(ui, x0, &mut y, w0, row, &solids, op, target, "dlg_sw");
+            }
+            Dialog::Loft { a, b, c, op, target } => {
+                let sketches = self.sketch_ids();
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Сечение 1", "Section 1"), 100.0);
+                State::body_combo(ui, id_of("dlg_lf_a"), fr, &sketches, a);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Сечение 2", "Section 2"), 100.0);
+                State::body_combo(ui, id_of("dlg_lf_b"), fr, &sketches, b);
+                y += row;
+                let mut with_none = vec![(0u64, t("— нет —", "— none —").to_string())];
+                with_none.extend(sketches.iter().cloned());
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Сечение 3", "Section 3"), 100.0);
+                State::body_combo(ui, id_of("dlg_lf_c"), fr, &with_none, c);
+                y += row;
+                Self::op_rows(ui, x0, &mut y, w0, row, &solids, op, target, "dlg_lf");
+            }
+            Dialog::Shell { id, thickness, outward, solidify } => {
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Тело", "Body"), 100.0);
+                State::body_combo(ui, id_of("dlg_sh_body"), fr, &solids, id);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Толщина", "Thickness"), 100.0);
+                ui.number_field(id_of("dlg_sh_t"), fr, thickness, t("мм", "mm"), 0.5, 0.01, 1e4);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Направление", "Direction"), 100.0);
+                let mut o = *outward as usize;
+                if ui.segmented(id_of("dlg_sh_dir"), fr, &[t("Внутрь", "Inside"), t("Наружу", "Outside")], &mut o) {
+                    *outward = o == 1;
+                }
+                y += row;
+                let hint = if *solidify { t("Придаёт толщину поверхности; края закрываются торцами", "Adds thickness to a surface; open edges get rims") } else { t("Делает тело полым со стенкой заданной толщины", "Hollows the body with the given wall thickness") };
+                ui.text_in(Rect::new(x0, y, w0, 18.0 * s), hint, 11.0, theme::TEXT_DIM(), 0);
+                y += row;
+            }
+            Dialog::Pattern { id, circular, count, spacing, angle, axis, join } => {
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Тело", "Body"), 100.0);
+                State::body_combo(ui, id_of("dlg_pt_body"), fr, &solids, id);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Тип", "Type"), 100.0);
+                let mut c = *circular as usize;
+                if ui.segmented(id_of("dlg_pt_type"), fr, &[t("Линейный", "Linear"), t("Круговой", "Circular")], &mut c) {
+                    *circular = c == 1;
+                }
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Ось", "Axis"), 100.0);
+                ui.segmented(id_of("dlg_pt_axis"), fr, &["X", "Y", "Z"], axis);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Количество", "Count"), 100.0);
+                ui.number_field(id_of("dlg_pt_count"), fr, count, t("шт", "pcs"), 1.0, 1.0, 500.0);
+                *count = count.round();
+                y += row;
+                if *circular {
+                    let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Угол", "Angle"), 100.0);
+                    ui.number_field(id_of("dlg_pt_angle"), fr, angle, "°", 15.0, -360.0, 360.0);
+                } else {
+                    let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Шаг", "Spacing"), 100.0);
+                    ui.number_field(id_of("dlg_pt_spacing"), fr, spacing, t("мм", "mm"), 1.0, -1e5, 1e5);
+                }
+                y += row;
+                ui.checkbox(id_of("dlg_pt_join"), Rect::new(x0, y, w0, 24.0 * s), t("Объединить в одно тело", "Merge into one body"), join);
+                y += row;
+            }
+            Dialog::Deform { id, kind, axis, angle, scale } => {
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Тело", "Body"), 100.0);
+                State::body_combo(ui, id_of("dlg_df_body"), fr, &solids, id);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Вид", "Kind"), 100.0);
+                ui.segmented(id_of("dlg_df_kind"), fr, &[t("Скрутка", "Twist"), t("Сужение", "Taper"), t("Изгиб", "Bend")], kind);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Ось", "Axis"), 100.0);
+                ui.segmented(id_of("dlg_df_axis"), fr, &["X", "Y", "Z"], axis);
+                y += row;
+                if *kind == 1 {
+                    let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Масштаб конца", "End scale"), 100.0);
+                    ui.number_field(id_of("dlg_df_scale"), fr, scale, "%", 10.0, 0.0, 1000.0);
+                } else {
+                    let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Угол", "Angle"), 100.0);
+                    ui.number_field(id_of("dlg_df_angle"), fr, angle, "°", 15.0, -3600.0, 3600.0);
+                }
+                y += row;
+                ui.text_in(Rect::new(x0, y, w0, 18.0 * s), t("Сетка при необходимости уплотняется", "The mesh is refined when needed"), 11.0, theme::TEXT_DIM(), 0);
+                y += row;
+            }
+            Dialog::Subdivide { id, levels, smooth } => {
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Тело", "Body"), 100.0);
+                State::body_combo(ui, id_of("dlg_sd_body"), fr, &solids, id);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Уровни", "Levels"), 100.0);
+                ui.number_field(id_of("dlg_sd_lv"), fr, levels, "", 1.0, 1.0, 4.0);
+                *levels = levels.round();
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Метод", "Method"), 100.0);
+                let mut m = (!*smooth) as usize;
+                if ui.segmented(id_of("dlg_sd_m"), fr, &[t("Гладкий (Loop)", "Smooth (Loop)"), t("Простой", "Simple")], &mut m) {
+                    *smooth = m == 0;
+                }
+                y += row;
+                let tris = self.scene.body(*id).map(|b| b.mesh.triangle_count()).unwrap_or(0);
+                let after = tris.saturating_mul(4usize.pow(levels.round().clamp(1.0, 4.0) as u32));
+                ui.text_in(Rect::new(x0, y, w0, 18.0 * s), &format!("{} → {} {}", fmt_count(tris), fmt_count(after), t("треуг.", "tris")), 11.5, theme::TEXT_DIM(), 0);
+                y += row;
+                ok_label = t("Подразделить", "Subdivide");
+            }
+            Dialog::Smooth { id, iterations, factor, taubin } => {
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Тело", "Body"), 100.0);
+                State::body_combo(ui, id_of("dlg_sm_body"), fr, &solids, id);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Проходов", "Iterations"), 100.0);
+                ui.number_field(id_of("dlg_sm_it"), fr, iterations, "", 1.0, 1.0, 200.0);
+                *iterations = iterations.round();
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Сила", "Factor"), 100.0);
+                ui.number_field(id_of("dlg_sm_f"), fr, factor, "", 0.05, 0.0, 1.0);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Метод", "Method"), 100.0);
+                let mut m = *taubin as usize;
+                if ui.segmented(id_of("dlg_sm_m"), fr, &[t("Лаплас", "Laplacian"), t("Таубин", "Taubin")], &mut m) {
+                    *taubin = m == 1;
+                }
+                y += row;
+                ok_label = t("Сгладить", "Smooth");
+            }
+            Dialog::Coil { radius, pitch, turns, wire } => {
+                ui.text_in(Rect::new(x0, y, w0, 20.0 * s), t("Ось пружины — Z; встанет рядом с моделью", "Coil axis is Z; placed next to the model"), 11.5, theme::TEXT_DIM(), 0);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Радиус витка", "Coil radius"), 110.0);
+                ui.number_field(id_of("dlg_cl_r"), fr, radius, t("мм", "mm"), 1.0, 0.1, 1e4);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Шаг", "Pitch"), 110.0);
+                ui.number_field(id_of("dlg_cl_p"), fr, pitch, t("мм", "mm"), 0.5, -1e4, 1e4);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Витков", "Turns"), 110.0);
+                ui.number_field(id_of("dlg_cl_n"), fr, turns, "", 0.5, 0.1, 200.0);
+                y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Радиус проволоки", "Wire radius"), 110.0);
+                ui.number_field(id_of("dlg_cl_w"), fr, wire, t("мм", "mm"), 0.1, 0.01, 1e3);
+                y += row;
+            }
             _ => {}
+        }
+        // Ошибка построения (из предпросмотра).
+        if d.is_feature() {
+            let key = d.preview_key(self);
+            let err = self.preview_error.borrow().as_ref().filter(|(k, _)| Some(*k) == key).map(|(_, e)| e.clone());
+            if let Some(e) = err {
+                ui.text_in(Rect::new(x0, y, w0, 20.0 * s), &model_error_text(&e), 11.5, theme::DANGER(), 0);
+                ok_enabled = false;
+            }
         }
         let _ = y;
 
@@ -321,6 +750,7 @@ impl State {
                 self.do_reduce(*id, *percent);
                 true
             }
+            d if d.is_feature() => self.apply_feature(d),
             _ => true,
         }
     }
@@ -523,7 +953,7 @@ impl State {
                     (t("ПКМ / СКМ", "RMB / MMB"), t("Сдвиг вида", "Pan")),
                     (t("Shift+ЛКМ", "Shift+LMB"), t("Сдвиг вида", "Pan")),
                     (t("Колесо", "Wheel"), t("Масштаб к курсору", "Zoom to cursor")),
-                    (t("Эскиз: L, R, C", "Sketch: L, R, C"), t("Линия, прямоуг., окружность", "Line, rectangle, circle")),
+                    (t("L R C A O S", "L R C A O S"), t("Инструменты эскиза", "Sketch tools")),
                     (t("Эскиз: Enter", "Sketch: Enter"), t("Завершить эскиз", "Finish sketch")),
                     ("Shift", t("Без привязки", "Disable snapping")),
                     ("Esc", t("Отмена / снять выбор", "Cancel / deselect")),

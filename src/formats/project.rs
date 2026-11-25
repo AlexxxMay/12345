@@ -395,13 +395,43 @@ fn sketch_json(sk: &Sketch) -> Json {
                 ("min".into(), vec3_json(*min)),
                 ("max".into(), vec3_json(*max)),
             ]),
+            SketchEntity::Polygon { center, radius, sides, rotation } => Json::Obj(vec![
+                ("kind".into(), Json::Str("polygon".into())),
+                ("center".into(), vec3_json(*center)),
+                ("radius".into(), Json::Num(*radius as f64)),
+                ("sides".into(), Json::Num(*sides as f64)),
+                ("rotation".into(), Json::Num(*rotation as f64)),
+            ]),
+            SketchEntity::Ellipse { center, rx, ry, rotation } => Json::Obj(vec![
+                ("kind".into(), Json::Str("ellipse".into())),
+                ("center".into(), vec3_json(*center)),
+                ("rx".into(), Json::Num(*rx as f64)),
+                ("ry".into(), Json::Num(*ry as f64)),
+                ("rotation".into(), Json::Num(*rotation as f64)),
+            ]),
+            SketchEntity::Slot { a, b, radius } => Json::Obj(vec![
+                ("kind".into(), Json::Str("slot".into())),
+                ("a".into(), vec3_json(*a)),
+                ("b".into(), vec3_json(*b)),
+                ("radius".into(), Json::Num(*radius as f64)),
+            ]),
+            SketchEntity::Spline { points, closed } => Json::Obj(vec![
+                ("kind".into(), Json::Str("spline".into())),
+                ("points".into(), Json::Arr(points.iter().map(|p| vec3_json(*p)).collect())),
+                ("closed".into(), Json::Bool(*closed)),
+            ]),
         })
         .collect();
-    Json::Obj(vec![
+    let mut fields: Vec<(String, Json)> = vec![
         ("name".into(), Json::Str(sk.name.clone())),
         ("plane".into(), Json::Str(sk.plane.name().into())),
-        ("entities".into(), Json::Arr(ents)),
-    ])
+    ];
+    if let SketchPlane::Custom { origin, normal } = sk.plane {
+        fields.push(("origin".into(), vec3_json(origin)));
+        fields.push(("normal".into(), vec3_json(normal)));
+    }
+    fields.push(("entities".into(), Json::Arr(ents)));
+    Json::Obj(fields)
 }
 
 pub fn scene_to_json(scene: &Scene) -> Json {
@@ -510,12 +540,17 @@ fn json_primitive(v: &Json) -> Option<Primitive> {
 }
 
 fn json_sketch(v: &Json) -> Option<Sketch> {
-    let plane = SketchPlane::from_name(v.get("plane").and_then(|x| x.as_str()).unwrap_or("XY"));
+    let plane_name = v.get("plane").and_then(|x| x.as_str()).unwrap_or("XY");
+    let plane = match (plane_name, v.get("origin"), v.get("normal")) {
+        ("Custom", Some(o), Some(n)) => SketchPlane::Custom { origin: json_vec3(o), normal: json_vec3(n) },
+        _ => SketchPlane::from_name(plane_name),
+    };
     let mut sk = Sketch::new(plane);
     sk.name = v.get("name").and_then(|x| x.as_str()).unwrap_or("Эскиз").to_string();
     if let Some(ents) = v.get("entities").and_then(|x| x.as_arr()) {
         for e in ents {
             let kind = e.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+            let num = |k: &str| e.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
             match kind {
                 "line" => sk.entities.push(SketchEntity::Line {
                     a: json_vec3(e.get("a")?),
@@ -534,6 +569,27 @@ fn json_sketch(v: &Json) -> Option<Sketch> {
                 "rect" => sk.entities.push(SketchEntity::Rect {
                     min: json_vec3(e.get("min")?),
                     max: json_vec3(e.get("max")?),
+                }),
+                "polygon" => sk.entities.push(SketchEntity::Polygon {
+                    center: json_vec3(e.get("center")?),
+                    radius: num("radius"),
+                    sides: (num("sides") as u32).clamp(3, 256),
+                    rotation: num("rotation"),
+                }),
+                "ellipse" => sk.entities.push(SketchEntity::Ellipse {
+                    center: json_vec3(e.get("center")?),
+                    rx: num("rx"),
+                    ry: num("ry"),
+                    rotation: num("rotation"),
+                }),
+                "slot" => sk.entities.push(SketchEntity::Slot {
+                    a: json_vec3(e.get("a")?),
+                    b: json_vec3(e.get("b")?),
+                    radius: num("radius"),
+                }),
+                "spline" => sk.entities.push(SketchEntity::Spline {
+                    points: e.get("points").and_then(|x| x.as_arr()).map(|a| a.iter().map(json_vec3).collect()).unwrap_or_default(),
+                    closed: matches!(e.get("closed"), Some(Json::Bool(true))),
                 }),
                 _ => {}
             }
@@ -607,5 +663,29 @@ mod tests {
         assert_eq!(bodies.len(), 1);
         let mesh = json_mesh(bodies[0].get("mesh").unwrap());
         assert_eq!(mesh.triangle_count(), 12);
+    }
+
+    #[test]
+    fn sketch_roundtrip_new_entities() {
+        use crate::math::{Vec2, Vec3};
+        let v = |x: f32, y: f32| Vec3::new(x, y, 0.0);
+        let mut sk = Sketch::new(SketchPlane::offset(SketchPlane::Xz, 12.5));
+        sk.name = "Все элементы".into();
+        sk.entities.push(SketchEntity::Polygon { center: v(1.0, 2.0), radius: 5.0, sides: 7, rotation: 0.25 });
+        sk.entities.push(SketchEntity::Ellipse { center: v(0.0, 0.0), rx: 6.0, ry: 3.0, rotation: 0.5 });
+        sk.entities.push(SketchEntity::Slot { a: v(0.0, 0.0), b: v(10.0, 0.0), radius: 2.0 });
+        sk.entities.push(SketchEntity::Spline { points: vec![v(0.0, 0.0), v(5.0, 5.0), v(10.0, 0.0)], closed: false });
+        sk.entities.push(SketchEntity::arc_3pt(Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(2.0, 2.0)).unwrap());
+        let text = to_json_string(&sketch_json(&sk));
+        let back = json_sketch(&parse_json(&text).unwrap()).unwrap();
+        assert_eq!(back.name, sk.name);
+        assert_eq!(back.plane, sk.plane);
+        assert_eq!(back.entities.len(), sk.entities.len());
+        for (a, b) in back.entities.iter().zip(&sk.entities) {
+            let (pa, _) = a.polyline();
+            let (pb, _) = b.polyline();
+            assert_eq!(pa.len(), pb.len());
+            assert!(pa.iter().zip(&pb).all(|(x, y)| x.distance(*y) < 1e-3), "{a:?} != {b:?}");
+        }
     }
 }

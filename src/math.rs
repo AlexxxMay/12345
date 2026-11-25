@@ -7,6 +7,7 @@ use std::ops::{Add, Mul, Neg, Sub};
 
 pub const PI: f32 = std::f32::consts::PI;
 pub const TAU: f32 = std::f32::consts::TAU;
+pub const FRAC_PI_2: f32 = std::f32::consts::FRAC_PI_2;
 pub const DEG2RAD: f32 = PI / 180.0;
 pub const RAD2DEG: f32 = 180.0 / PI;
 

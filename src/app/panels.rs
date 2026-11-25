@@ -199,6 +199,7 @@ impl State {
         let sel_mesh = sel.map(|b| !b.mesh.is_empty()).unwrap_or(false);
         let solids = self.scene.bodies.iter().filter(|b| !b.mesh.is_empty()).count();
         let has_sketch = self.scene.bodies.iter().any(|b| b.sketch.is_some());
+        let sketches = self.scene.bodies.iter().filter(|b| b.sketch.is_some()).count();
         let tool = self.tool;
         let mk_active = |mut d: ToolDef, a: bool| {
             d.active = a;
@@ -215,17 +216,21 @@ impl State {
                     vec![
                         td(Icon::Sketch, t("Создать эскиз", "Create sketch"), t("Начать 2D-эскиз на плоскости", "Start a 2D sketch on a plane"), "", Action::NewSketch),
                         en(td(Icon::Extrude, t("Выдавить", "Extrude"), t("Выдавить профиль эскиза в тело", "Extrude a sketch profile into a body"), "E", Action::Extrude), has_sketch),
+                        en(td(Icon::Revolve, t("Вращение", "Revolve"), t("Тело вращения профиля вокруг оси эскиза или отрезка", "Revolve a profile around a sketch axis or line"), "", Action::Revolve), has_sketch),
+                        en(td(Icon::Sweep, t("Сдвиг", "Sweep"), t("Протянуть профиль вдоль траектории из другого эскиза", "Sweep a profile along a path from another sketch"), "", Action::Sweep), sketches >= 2),
+                        en(td(Icon::Loft, t("Лофт", "Loft"), t("Плавный переход между сечениями из разных эскизов", "Smooth transition between sections from different sketches"), "", Action::Loft), sketches >= 2),
                         td(Icon::Box, t("Параллелепипед", "Box"), t("Создать параллелепипед", "Create a box"), "", Action::CreatePrimitive(PrimKind::Box)),
                         td(Icon::Cylinder, t("Цилиндр", "Cylinder"), t("Создать цилиндр", "Create a cylinder"), "", Action::CreatePrimitive(PrimKind::Cylinder)),
                         td(Icon::Sphere, t("Сфера", "Sphere"), t("Создать сферу", "Create a sphere"), "", Action::CreatePrimitive(PrimKind::Sphere)),
-                        td(Icon::Torus, t("Тор", "Torus"), t("Создать тор", "Create a torus"), "", Action::CreatePrimitive(PrimKind::Torus)),
                     ],
                     vec![
+                        td(Icon::Torus, t("Тор", "Torus"), t("Создать тор", "Create a torus"), "", Action::CreatePrimitive(PrimKind::Torus)),
                         td(Icon::Cone, t("Конус", "Cone"), "", "", Action::CreatePrimitive(PrimKind::Cone)),
                         td(Icon::Tube, t("Труба", "Pipe"), "", "", Action::CreatePrimitive(PrimKind::Tube)),
                         td(Icon::Wedge, t("Клин", "Wedge"), "", "", Action::CreatePrimitive(PrimKind::Wedge)),
                         td(Icon::Pyramid, t("Пирамида", "Pyramid"), "", "", Action::CreatePrimitive(PrimKind::Pyramid)),
                         td(Icon::Capsule, t("Капсула", "Capsule"), "", "", Action::CreatePrimitive(PrimKind::Capsule)),
+                        td(Icon::Coil, t("Пружина", "Coil"), "", "", Action::Coil),
                     ],
                 ),
                 (
@@ -234,14 +239,29 @@ impl State {
                         en(mk_active(td(Icon::Move, t("Переместить", "Move"), t("Перемещение манипулятором", "Move with the manipulator"), "M", Action::SetTool(Tool::Move)), tool == Tool::Move), true),
                         mk_active(td(Icon::Rotate, t("Повернуть", "Rotate"), t("Поворот манипулятором (шаг 5°, Shift — свободно)", "Rotate with the manipulator (5° snap, Shift — free)"), "R", Action::SetTool(Tool::Rotate)), tool == Tool::Rotate),
                         mk_active(td(Icon::Scale, t("Масштаб", "Scale"), t("Масштабирование по осям или равномерно", "Scale per axis or uniformly"), "S", Action::SetTool(Tool::Scale)), tool == Tool::Scale),
+                        en(td(Icon::Shell, t("Оболочка", "Shell"), t("Сделать тело полым с заданной толщиной стенки", "Hollow the body with a given wall thickness"), "", Action::Shell), sel_mesh),
                         en(td(Icon::Union, t("Объединить", "Combine"), t("Булевы операции: объединение, вычитание, пересечение", "Boolean: join, cut, intersect"), "", Action::Combine(BoolOp::Union)), solids >= 2),
                         en(td(Icon::Mirror, t("Зеркало", "Mirror"), t("Зеркальное отражение тела", "Mirror a body"), "", Action::Mirror), sel_mesh),
+                        en(td(Icon::Pattern, t("Массив", "Pattern"), t("Линейный или круговой массив копий тела", "Linear or circular pattern of a body"), "", Action::Pattern), sel_mesh),
                     ],
                     vec![
                         en(td(Icon::Subtract, t("Вычесть", "Cut"), "", "", Action::Combine(BoolOp::Subtract)), solids >= 2),
                         en(td(Icon::Intersect, t("Пересечь", "Intersect"), "", "", Action::Combine(BoolOp::Intersect)), solids >= 2),
                         en(td(Icon::Duplicate, t("Дублировать", "Duplicate"), "", "Ctrl+D", Action::Duplicate), has_sel),
                         en(td(Icon::Delete, t("Удалить", "Delete"), "", "Del", Action::Delete), has_sel),
+                    ],
+                ),
+                (
+                    t("СЛОЖНЫЕ ФОРМЫ", "ADVANCED"),
+                    vec![
+                        en(td(Icon::Twist, t("Скручивание", "Twist"), t("Скрутить тело вокруг оси", "Twist the body around an axis"), "", Action::Deform(0)), sel_mesh),
+                        en(td(Icon::Taper, t("Сужение", "Taper"), t("Плавно сузить или расширить тело вдоль оси", "Taper the body along an axis"), "", Action::Deform(1)), sel_mesh),
+                        en(td(Icon::Bend, t("Изгиб", "Bend"), t("Изогнуть тело по дуге", "Bend the body along an arc"), "", Action::Deform(2)), sel_mesh),
+                        td(Icon::Coil, t("Пружина", "Coil"), t("Пружина: радиус, шаг, витки, проволока", "Coil: radius, pitch, turns, wire"), "", Action::Coil),
+                    ],
+                    vec![
+                        en(td(Icon::Subdivide, t("Подразделить", "Subdivide"), "", "", Action::Subdivide), sel_mesh),
+                        en(td(Icon::Smooth, t("Сгладить", "Smooth"), "", "", Action::Smooth), sel_mesh),
                     ],
                 ),
                 (
@@ -265,12 +285,19 @@ impl State {
                                 mk_active(td(Icon::Line, t("Линия", "Line"), t("Ломаная: щелчки по точкам, замыкание — щелчок в начало", "Polyline: click points, click start to close"), "L", Action::SetTool(Tool::Line)), tool == Tool::Line),
                                 mk_active(td(Icon::Rect, t("Прямоугольник", "Rectangle"), t("Прямоугольник по двум углам", "Two-point rectangle"), "R", Action::SetTool(Tool::Rectangle)), tool == Tool::Rectangle),
                                 mk_active(td(Icon::Circle, t("Окружность", "Circle"), t("Окружность: центр и радиус", "Circle: center and radius"), "C", Action::SetTool(Tool::Circle)), tool == Tool::Circle),
+                                mk_active(td(Icon::Arc, t("Дуга", "Arc"), t("Дуга по трём точкам: начало, конец, точка на дуге", "Three-point arc: start, end, point on arc"), "A", Action::SetTool(Tool::Arc)), tool == Tool::Arc),
+                                mk_active(td(Icon::Polygon, t("Многоугольник", "Polygon"), t("Правильный многоугольник: центр и вершина (число сторон — на панели)", "Regular polygon: center and vertex (sides in the panel)"), "O", Action::SetTool(Tool::Polygon)), tool == Tool::Polygon),
+                                mk_active(td(Icon::Ellipse, t("Эллипс", "Ellipse"), t("Эллипс: центр, конец большой оси, ширина", "Ellipse: center, major axis end, width"), "", Action::SetTool(Tool::Ellipse)), tool == Tool::Ellipse),
+                                mk_active(td(Icon::Slot, t("Паз", "Slot"), t("Паз: центры концов и ширина", "Slot: end centers and width"), "", Action::SetTool(Tool::Slot)), tool == Tool::Slot),
+                                mk_active(td(Icon::Spline, t("Сплайн", "Spline"), t("Гладкая кривая через точки; Enter / ПКМ — завершить, щелчок в начало — замкнуть", "Smooth curve through points; Enter / RMB to finish, click start to close"), "S", Action::SetTool(Tool::Spline)), tool == Tool::Spline),
                             ],
                             vec![],
                         ),
                         (
                             t("ИЗМЕНИТЬ", "MODIFY"),
                             vec![
+                                mk_active(td(Icon::SketchFillet, t("Скругление", "Fillet"), t("Скруглить угол между двумя отрезками (радиус — на панели)", "Fillet a corner between two lines (radius in the panel)"), "", Action::SetTool(Tool::SketchFillet)), tool == Tool::SketchFillet),
+                                mk_active(td(Icon::SketchOffset, t("Смещение", "Offset"), t("Эквидистанта: щелчок по линии (расстояние — на панели, минус — внутрь)", "Offset: click a curve (distance in the panel, negative — inward)"), "", Action::SetTool(Tool::SketchOffset)), tool == Tool::SketchOffset),
                                 td(Icon::Undo, t("Удалить последний", "Remove last"), t("Удалить последний элемент эскиза", "Remove the last sketch entity"), "", Action::SketchUndo),
                                 mk_active(td(Icon::Select, t("Выбор", "Select"), t("Навигация без рисования", "Navigate without drawing"), "V", Action::SetTool(Tool::Select)), tool == Tool::Select),
                             ],
@@ -291,6 +318,9 @@ impl State {
                         vec![
                             td(Icon::Sketch, t("Создать эскиз", "Create sketch"), t("Выбрать плоскость и начать эскиз", "Pick a plane and start sketching"), "", Action::NewSketch),
                             en(td(Icon::Extrude, t("Выдавить", "Extrude"), t("Выдавить профиль эскиза", "Extrude a sketch profile"), "E", Action::Extrude), has_sketch),
+                            en(td(Icon::Revolve, t("Вращение", "Revolve"), t("Тело вращения профиля", "Revolve a profile"), "", Action::Revolve), has_sketch),
+                            en(td(Icon::Sweep, t("Сдвиг", "Sweep"), t("Протянуть профиль вдоль траектории", "Sweep a profile along a path"), "", Action::Sweep), sketches >= 2),
+                            en(td(Icon::Loft, t("Лофт", "Loft"), t("Переход между сечениями", "Transition between sections"), "", Action::Loft), sketches >= 2),
                         ],
                         vec![],
                     )]
@@ -306,6 +336,19 @@ impl State {
                         en(td(Icon::Reduce, t("Упростить", "Reduce"), t("Уменьшить число треугольников", "Reduce the triangle count"), "", Action::Reduce), sel_mesh),
                     ],
                     vec![],
+                ),
+                (
+                    t("МОДИФИКАТОРЫ", "MODIFIERS"),
+                    vec![
+                        en(td(Icon::Subdivide, t("Подразделить", "Subdivide"), t("Подразделение поверхности: гладкое (Loop) или простое", "Subdivision surface: smooth (Loop) or simple"), "", Action::Subdivide), sel_mesh),
+                        en(td(Icon::Smooth, t("Сгладить", "Smooth"), t("Сглаживание вершин: Лаплас или Таубин (без усадки)", "Vertex smoothing: Laplacian or Taubin (no shrinking)"), "", Action::Smooth), sel_mesh),
+                        en(td(Icon::Solidify, t("Толщина", "Solidify"), t("Придать поверхности толщину", "Give a surface thickness"), "", Action::Solidify), sel_mesh),
+                    ],
+                    vec![
+                        en(td(Icon::Twist, t("Скручивание", "Twist"), "", "", Action::Deform(0)), sel_mesh),
+                        en(td(Icon::Taper, t("Сужение", "Taper"), "", "", Action::Deform(1)), sel_mesh),
+                        en(td(Icon::Bend, t("Изгиб", "Bend"), "", "", Action::Deform(2)), sel_mesh),
+                    ],
                 ),
                 (
                     t("ЗАТЕНЕНИЕ", "SHADING"),
@@ -718,7 +761,7 @@ impl State {
             ui.section(Rect::new(x0, y, w0, 20.0 * s), t("Эскиз", "Sketch"));
             y += row;
             let fr = ui.labeled(Rect::new(x0, y, w0, 24.0 * s), t("Плоскость", "Plane"), 110.0);
-            ui.text_in(fr, sk.plane.name(), 12.5, theme::TEXT(), 0);
+            ui.text_in(fr, &sk.plane.label(), 12.5, theme::TEXT(), 0);
             y += row;
             let fr = ui.labeled(Rect::new(x0, y, w0, 24.0 * s), t("Элементов", "Entities"), 110.0);
             ui.text_in(fr, &sk.entities.len().to_string(), 12.5, theme::TEXT(), 0);
@@ -836,7 +879,7 @@ impl State {
         }
         let s = ui.s;
         let area = self.layout.right;
-        let r = Rect::new(area.x, area.y, area.w, 232.0 * s);
+        let r = Rect::new(area.x, area.y, area.w, 316.0 * s);
         ui.panel(r, 6.0);
         let hr = Rect::new(r.x, r.y, r.w, 34.0 * s);
         ui.fb.fill_rounded(Rect::new(hr.x + 1.0, hr.y + 1.0, hr.w - 2.0, hr.h), 6.0 * s, theme::SKETCH_SOFT());
@@ -850,16 +893,57 @@ impl State {
             (Tool::Line, Icon::Line, t("Линия (L)", "Line (L)")),
             (Tool::Rectangle, Icon::Rect, t("Прямоугольник (R)", "Rectangle (R)")),
             (Tool::Circle, Icon::Circle, t("Окружность (C)", "Circle (C)")),
+            (Tool::Arc, Icon::Arc, t("Дуга (A)", "Arc (A)")),
+            (Tool::Polygon, Icon::Polygon, t("Многоугольник (O)", "Polygon (O)")),
+            (Tool::Ellipse, Icon::Ellipse, t("Эллипс", "Ellipse")),
+            (Tool::Slot, Icon::Slot, t("Паз", "Slot")),
+            (Tool::Spline, Icon::Spline, t("Сплайн (S)", "Spline (S)")),
+            (Tool::SketchFillet, Icon::SketchFillet, t("Скругление", "Fillet")),
+            (Tool::SketchOffset, Icon::SketchOffset, t("Смещение", "Offset")),
             (Tool::Select, Icon::Select, t("Навигация (V)", "Navigate (V)")),
         ];
-        let bw = (w0 - 12.0 * s) / 4.0;
+        let per_row = 6usize;
+        let bw = (w0 - 4.0 * s * (per_row as f32 - 1.0)) / per_row as f32;
         for (i, (tl, ic, tip)) in tools.iter().enumerate() {
-            let br = Rect::new(x0 + i as f32 * (bw + 4.0 * s), y, bw, 34.0 * s);
+            let (cx, cy) = ((i % per_row) as f32, (i / per_row) as f32);
+            let br = Rect::new(x0 + cx * (bw + 4.0 * s), y + cy * 34.0 * s, bw, 30.0 * s);
             if ui.icon_button(id_idx(id_of("sk_tool"), i), br, *ic, tip, self.tool == *tl, true) {
                 self.run_action(Action::SetTool(*tl));
             }
         }
-        y += 42.0 * s;
+        y += 72.0 * s;
+        // Подсказка и параметр текущего инструмента.
+        let hint = match self.tool {
+            Tool::Line => t("Щелчки по точкам; щелчок в начало — замкнуть, ПКМ — прервать", "Click points; click the start to close, RMB to stop"),
+            Tool::Rectangle => t("Два противоположных угла", "Two opposite corners"),
+            Tool::Circle => t("Центр, затем точка на окружности", "Center, then a point on the circle"),
+            Tool::Arc => t("Начало, конец, затем точка на дуге", "Start, end, then a point on the arc"),
+            Tool::Polygon => t("Центр, затем вершина", "Center, then a vertex"),
+            Tool::Ellipse => t("Центр, конец большой оси, затем ширина", "Center, major axis end, then width"),
+            Tool::Slot => t("Центры двух концов, затем ширина", "Two end centers, then width"),
+            Tool::Spline => t("Точки кривой; Enter / ПКМ — готово, щелчок в начало — замкнуть", "Curve points; Enter / RMB to finish, click start to close"),
+            Tool::SketchFillet => t("Щёлкните по углу между двумя отрезками", "Click a corner between two lines"),
+            Tool::SketchOffset => t("Щёлкните по линии; минус — внутрь", "Click a curve; negative — inward"),
+            _ => t("Навигация без рисования", "Navigate without drawing"),
+        };
+        ui.text_in(Rect::new(x0, y, w0, 18.0 * s), hint, 11.0, theme::TEXT_DIM(), 0);
+        y += 22.0 * s;
+        let param: Option<(&str, &mut f32, &str, f32, f32, f32)> = match self.tool {
+            Tool::Polygon => Some((t("Сторон", "Sides"), &mut self.sketch_params.polygon_sides, "", 1.0, 3.0, 64.0)),
+            Tool::SketchFillet => Some((t("Радиус", "Radius"), &mut self.sketch_params.fillet_radius, t("мм", "mm"), 0.5, 0.01, 1e4)),
+            Tool::SketchOffset => Some((t("Расстояние", "Distance"), &mut self.sketch_params.offset, t("мм", "mm"), 0.5, -1e4, 1e4)),
+            _ => None,
+        };
+        if let Some((label, v, unit, step, lo, hi)) = param {
+            let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), label, 100.0);
+            if ui.number_field(id_of("sk_param"), fr, v, unit, step, lo, hi) {
+                self.invalidate_view();
+            }
+            if self.tool == Tool::Polygon {
+                self.sketch_params.polygon_sides = self.sketch_params.polygon_sides.round();
+            }
+        }
+        y += 32.0 * s;
         let (n_ent, n_prof) = self.sketch.as_ref().map(|s| (s.sketch.entities.len(), s.sketch.profiles().len())).unwrap_or((0, 0));
         ui.text_in(Rect::new(x0, y, w0, 20.0 * s), &format!("{}: {}   {}: {}", t("Элементов", "Entities"), n_ent, t("Замкнутых профилей", "Closed profiles"), n_prof), 12.0, theme::TEXT_DIM(), 0);
         y += 24.0 * s;
@@ -1220,6 +1304,14 @@ fn command_icon(c: &Command) -> (Icon, String) {
                 Icon::Union
             } else if label.contains("Зерк") || label.contains("Mirror") {
                 Icon::Mirror
+            } else if label.contains("Вращ") || label.contains("Revolve") {
+                Icon::Revolve
+            } else if label.contains("Сдвиг") || label.contains("Sweep") {
+                Icon::Sweep
+            } else if label.contains("Лофт") || label.contains("Loft") {
+                Icon::Loft
+            } else if label.contains("Массив") || label.contains("Pattern") {
+                Icon::Pattern
             } else {
                 cmds.first().map(|c| command_icon(c).0).unwrap_or(Icon::Body)
             };

@@ -76,6 +76,25 @@ pub enum Icon {
     Back,
     Language,
     Plane,
+    Arc,
+    Polygon,
+    Ellipse,
+    Slot,
+    Spline,
+    SketchFillet,
+    SketchOffset,
+    Revolve,
+    Sweep,
+    Loft,
+    Shell,
+    Pattern,
+    Twist,
+    Taper,
+    Bend,
+    Coil,
+    Subdivide,
+    Smooth,
+    Solidify,
 }
 
 const TOP: u32 = 0xFFCF_E3F7;
@@ -560,6 +579,155 @@ pub fn draw(fb: &mut Framebuffer, icon: Icon, r: Rect, c: u32) {
             p.line(3.0, 12.0, 21.0, 12.0, 1.3, c);
             p.line(5.0, 7.5, 19.0, 7.5, 1.0, c);
             p.line(5.0, 16.5, 19.0, 16.5, 1.0, c);
+        }
+        Icon::Arc => {
+            p.arc(12.0, 16.0, 8.0, PI, 2.0 * PI, 2.0, c);
+            p.circle(4.0, 16.0, 2.2, ORANGE);
+            p.circle(20.0, 16.0, 2.2, ORANGE);
+            p.circle(12.0, 8.0, 1.8, ORANGE);
+        }
+        Icon::Polygon => {
+            let pts: Vec<(f32, f32)> = (0..6).map(|i| {
+                let a = PI / 3.0 * i as f32;
+                (12.0 + 8.5 * a.cos(), 12.0 + 8.5 * a.sin())
+            }).collect();
+            p.stroke(&pts, 2.0, c, true);
+            p.circle(12.0, 12.0, 1.8, ORANGE);
+            p.circle(20.5, 12.0, 2.2, ORANGE);
+        }
+        Icon::Ellipse => {
+            p.ellipse(12.0, 12.0, 9.0, 5.5, None, Some((2.0, c)));
+            p.circle(12.0, 12.0, 1.8, ORANGE);
+            p.line(12.0, 12.0, 21.0, 12.0, 1.0, ORANGE);
+        }
+        Icon::Slot => {
+            let mut pts = Vec::new();
+            for i in 0..=12 {
+                let a = -PI / 2.0 + PI * i as f32 / 12.0;
+                pts.push((16.0 + 5.0 * a.cos(), 12.0 + 5.0 * a.sin()));
+            }
+            for i in 0..=12 {
+                let a = PI / 2.0 + PI * i as f32 / 12.0;
+                pts.push((8.0 + 5.0 * a.cos(), 12.0 + 5.0 * a.sin()));
+            }
+            p.stroke(&pts, 2.0, c, true);
+            p.circle(8.0, 12.0, 1.8, ORANGE);
+            p.circle(16.0, 12.0, 1.8, ORANGE);
+        }
+        Icon::Spline => {
+            let pts: Vec<(f32, f32)> = (0..=24).map(|i| {
+                let t = i as f32 / 24.0;
+                (3.0 + 18.0 * t, 12.0 - 7.0 * (t * 2.0 * PI).sin())
+            }).collect();
+            p.stroke(&pts, 2.0, c, false);
+            for (x, y) in [(3.0, 12.0), (7.5, 5.0), (16.5, 19.0), (21.0, 12.0)] {
+                p.circle(x, y, 2.0, ORANGE);
+            }
+        }
+        Icon::SketchFillet => {
+            p.line(5.0, 3.0, 5.0, 11.0, 2.0, c);
+            p.line(13.0, 19.0, 21.0, 19.0, 2.0, c);
+            p.arc(13.0, 11.0, 8.0, PI * 0.5, PI, 2.2, ORANGE);
+            p.stroke(&[(5.0, 11.0), (5.0, 19.0), (13.0, 19.0)], 1.0, 0x80F0_8A24, false);
+        }
+        Icon::SketchOffset => {
+            p.stroke(&[(8.0, 8.0), (16.0, 8.0), (16.0, 16.0), (8.0, 16.0)], 2.0, c, true);
+            p.stroke(&[(4.0, 4.0), (20.0, 4.0), (20.0, 20.0), (4.0, 20.0)], 1.6, ORANGE, true);
+            p.line(16.0, 12.0, 20.0, 12.0, 1.0, BLUE);
+        }
+        Icon::Revolve => {
+            p.ellipse(12.0, 17.0, 8.5, 3.2, Some(LEFT), Some((1.0, OUTLINE)));
+            p.poly(&[(14.0, 6.0), (19.0, 6.0), (19.0, 16.0), (14.0, 16.0)], 0xFFFD_E3C6);
+            p.stroke(&[(14.0, 6.0), (19.0, 6.0), (19.0, 16.0), (14.0, 16.0)], 1.1, ORANGE, true);
+            p.line(12.0, 2.0, 12.0, 22.0, 1.4, BLUE);
+            p.arc(12.0, 17.0, 8.5, PI * 0.15, PI * 0.95, 1.8, BLUE);
+            p.arrow_head(12.0 + 8.5 * (PI * 0.95f32).cos(), 17.0 + 3.2 * (PI * 0.95f32).sin(), -1.0, -0.4, 3.0, BLUE);
+        }
+        Icon::Sweep => {
+            let path: Vec<(f32, f32)> = (0..=16).map(|i| {
+                let t = i as f32 / 16.0;
+                (4.0 + 16.0 * t, 19.0 - 14.0 * t * t)
+            }).collect();
+            p.stroke(&path, 6.0, LEFT, false);
+            p.stroke(&path, 1.2, ORANGE, false);
+            p.ellipse(4.0, 19.0, 2.2, 3.2, Some(TOP), Some((1.0, OUTLINE)));
+            p.ellipse(20.0, 5.0, 3.2, 2.2, Some(TOP), Some((1.0, OUTLINE)));
+        }
+        Icon::Loft => {
+            p.poly(&[(3.0, 18.0), (21.0, 18.0), (16.0, 6.0), (8.0, 6.0)], LEFT);
+            p.poly(&[(14.0, 18.0), (21.0, 18.0), (16.0, 6.0), (13.0, 6.0)], RIGHT);
+            p.ellipse(12.0, 6.0, 4.0, 1.6, Some(TOP), Some((1.0, OUTLINE)));
+            p.stroke(&[(3.0, 18.0), (21.0, 18.0)], 1.6, ORANGE, false);
+            p.line(3.0, 18.0, 8.0, 6.0, 1.0, OUTLINE);
+            p.line(21.0, 18.0, 16.0, 6.0, 1.0, OUTLINE);
+        }
+        Icon::Shell => {
+            p.iso_box(12.0, 3.0, 8.0, 9.0);
+            p.poly(&[(12.0, 5.0), (17.0, 7.5), (12.0, 10.0), (7.0, 7.5)], RIGHT);
+            p.poly(&[(7.0, 7.5), (12.0, 10.0), (12.0, 11.5), (7.0, 9.0)], OUTLINE);
+            p.stroke(&[(12.0, 5.0), (17.0, 7.5), (12.0, 10.0), (7.0, 7.5)], 0.9, OUTLINE, true);
+        }
+        Icon::Pattern => {
+            p.iso_box(5.5, 9.0, 3.5, 5.0);
+            p.iso_box(12.0, 6.0, 3.5, 5.0);
+            p.iso_box(18.5, 3.0, 3.5, 5.0);
+        }
+        Icon::Twist => {
+            p.poly(&[(8.0, 4.0), (16.0, 4.0), (16.0, 21.0), (8.0, 21.0)], LEFT);
+            for k in 0..3 {
+                let y = 6.0 + k as f32 * 5.5;
+                p.stroke(&[(8.0, y + 4.0), (12.0, y + 1.0), (16.0, y)], 1.2, OUTLINE, false);
+            }
+            p.stroke(&[(8.0, 4.0), (16.0, 4.0), (16.0, 21.0), (8.0, 21.0)], 1.1, OUTLINE, true);
+            p.arc(12.0, 4.0, 7.0, PI * 1.1, PI * 1.9, 1.6, BLUE);
+            p.arrow_head(12.0 + 7.0 * (PI * 1.9f32).cos(), 4.0 + 7.0 * (PI * 1.9f32).sin(), 1.0, 0.6, 2.6, BLUE);
+        }
+        Icon::Taper => {
+            p.poly(&[(4.0, 20.0), (20.0, 20.0), (15.0, 4.0), (9.0, 4.0)], LEFT);
+            p.poly(&[(13.0, 20.0), (20.0, 20.0), (15.0, 4.0), (12.5, 4.0)], RIGHT);
+            p.stroke(&[(4.0, 20.0), (20.0, 20.0), (15.0, 4.0), (9.0, 4.0)], 1.1, OUTLINE, true);
+        }
+        Icon::Bend => {
+            let outer: Vec<(f32, f32)> = (0..=12).map(|i| {
+                let a = PI + PI * 0.5 * i as f32 / 12.0;
+                (20.0 + 16.0 * a.cos(), 21.0 + 16.0 * a.sin())
+            }).collect();
+            let inner: Vec<(f32, f32)> = (0..=12).rev().map(|i| {
+                let a = PI + PI * 0.5 * i as f32 / 12.0;
+                (20.0 + 10.0 * a.cos(), 21.0 + 10.0 * a.sin())
+            }).collect();
+            let mut band = outer.clone();
+            band.extend(inner.iter().copied());
+            p.poly(&band, LEFT);
+            p.stroke(&band, 1.1, OUTLINE, true);
+        }
+        Icon::Coil => {
+            for k in 0..4 {
+                let y = 5.0 + k as f32 * 4.5;
+                p.arc(12.0, y, 8.0, 0.0, PI, 2.0, OUTLINE);
+                p.arc(12.0, y + 2.2, 8.0, PI, 2.0 * PI, 2.0, LEFT);
+            }
+        }
+        Icon::Subdivide => {
+            p.poly(&[(12.0, 3.0), (21.0, 20.0), (3.0, 20.0)], TOP);
+            p.stroke(&[(12.0, 3.0), (21.0, 20.0), (3.0, 20.0)], 1.6, OUTLINE, true);
+            p.stroke(&[(7.5, 11.5), (16.5, 11.5), (12.0, 20.0)], 1.1, BLUE, true);
+        }
+        Icon::Smooth => {
+            p.stroke(&[(3.0, 16.0), (6.0, 9.0), (9.0, 15.0), (12.0, 7.0), (15.0, 14.0), (18.0, 8.0), (21.0, 13.0)], 1.0, c, false);
+            let sm: Vec<(f32, f32)> = (0..=20).map(|i| {
+                let t = i as f32 / 20.0;
+                (3.0 + 18.0 * t, 13.5 - 2.5 * (t * PI).sin())
+            }).collect();
+            p.stroke(&sm, 2.2, BLUE, false);
+        }
+        Icon::Solidify => {
+            p.poly(&[(3.0, 10.0), (14.0, 5.0), (21.0, 9.0), (10.0, 14.0)], TOP);
+            p.poly(&[(3.0, 10.0), (10.0, 14.0), (10.0, 19.0), (3.0, 15.0)], LEFT);
+            p.poly(&[(10.0, 14.0), (21.0, 9.0), (21.0, 14.0), (10.0, 19.0)], RIGHT);
+            p.stroke(&[(3.0, 10.0), (14.0, 5.0), (21.0, 9.0), (21.0, 14.0), (10.0, 19.0), (3.0, 15.0)], 1.1, OUTLINE, true);
+            p.stroke(&[(3.0, 10.0), (10.0, 14.0), (21.0, 9.0)], 0.9, OUTLINE, false);
+            p.line(10.0, 14.0, 10.0, 19.0, 0.9, OUTLINE);
         }
         Icon::Plane => {
             p.poly(&[(2.0, 14.0), (14.0, 8.0), (22.0, 12.0), (10.0, 18.0)], 0xFFFD_E3C6);

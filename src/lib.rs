@@ -9,6 +9,7 @@
 //! - [`mesh`] — треугольные меши, примитивы, измерения, операции.
 //! - [`formats`] — чтение/запись STL, STEP, 3MF, OBJ, PLY и формата проекта.
 //! - [`sketch`] — 2D-эскизы и выдавливание (extrude).
+//! - [`modeling`] — вращение, сдвиг, лофт, оболочка, подразделение, деформации.
 //! - [`scene`] — сцена, тела, история undo/redo.
 //! - [`renderer`] — программный 3D-рендерер (z-буфер, многопоточность).
 //! - [`platform`] — оконная система Win32 / Cocoa / X11 через FFI.
@@ -21,6 +22,7 @@ pub mod csg;
 pub mod formats;
 pub mod math;
 pub mod mesh;
+pub mod modeling;
 pub mod platform;
 pub mod renderer;
 pub mod scene;

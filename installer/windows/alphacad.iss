@@ -1,5 +1,5 @@
 ; Установщик AlphaCad для Windows x64 (Inno Setup 6.7+ / 7.x — тёмная тема и фон).
-; Сборка: iscc /DMyAppVersion=0.2.0 installer\windows\alphacad.iss
+; Сборка: iscc /DMyAppVersion=0.2.1 installer\windows\alphacad.iss
 
 #if Ver < EncodeVer(6,7,0)
   #error Требуется Inno Setup 6.7 или новее (WizardBackImageFile)
@@ -7,7 +7,7 @@
 
 #define MyAppName "AlphaCad"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.0"
+  #define MyAppVersion "0.2.1"
 #endif
 #define MyAppExe "alphacad.exe"
 
@@ -66,6 +66,7 @@ Name: "assoc"; Description: "{cm:AssocTask}"; GroupDescription: "{cm:AssocGroup}
 Source: "..\..\target\release\{#MyAppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; DestName: "README.txt"; Flags: ignoreversion
 Source: "..\..\assets\fonts\LICENSE-DejaVu.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
+Source: "..\..\assets\fonts\LICENSE-osifont.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"

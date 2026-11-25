@@ -91,6 +91,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path portable | Out-Null
           Copy-Item target\release\alphacad.exe portable\
           Copy-Item README.md portable\README.txt
+          New-Item -ItemType Directory -Force -Path portable\licenses | Out-Null
+          Copy-Item assets\fonts\LICENSE-*.txt portable\licenses\
           Compress-Archive -Path portable\* -DestinationPath "target\installer\AlphaCad-${{ steps.ver.outputs.version }}-windows-x64-portable.zip" -Force
       - uses: actions/upload-artifact@v4
         with:
@@ -153,6 +155,8 @@ jobs:
           done
           iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AlphaCad.icns"
           cp README.md "$APP/Contents/Resources/README.txt"
+          mkdir -p "$APP/Contents/Resources/licenses"
+          cp assets/fonts/LICENSE-*.txt "$APP/Contents/Resources/licenses/"
           codesign --force --deep --sign - "$APP"
           codesign --verify --verbose "$APP"
       - name: DMG (dark background with logo)

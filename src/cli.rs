@@ -186,7 +186,8 @@ pub fn convert(input: &Path, output: &Path, ascii: bool) -> Result<(), String> {
 ///
 /// Шаги сценария: `box`, `cylinder`, `sphere`, `torus`, `ok` (Enter), `esc`, `fit`,
 /// `wire`, `help`, `settings`, `sketch`, `info`, `click:X:Y`, `rclick:X:Y`, `move:X:Y`,
-/// `drag:X1:Y1:X2:Y2`, `key:c`.
+/// `drag:X1:Y1:X2:Y2`, `key:c`, `action:revolve|sweep|loft|shell|solidify|pattern|twist|taper|bend|subdivide|smooth|coil|finish|select-last`,
+/// `tool:line|rect|circle|arc|polygon|ellipse|slot|spline|fillet|offset`, `demo:revolve|sweep|loft|shapes`.
 pub fn snapshot(output: &Path, files: Vec<PathBuf>, size: (usize, usize), lang: Option<bool>, script: &[String], opts: &SnapshotOpts) -> Result<(), String> {
     let mut app = App::new(files);
     if let Some(en) = lang {
@@ -251,6 +252,48 @@ pub fn snapshot(output: &Path, files: Vec<PathBuf>, size: (usize, usize), lang: 
                 app.event(Event::MouseButton { button: MouseButton::Left, down: false });
                 app.frame();
             }
+            "action" => {
+                let a = match parts.get(1).copied().unwrap_or("") {
+                    "revolve" => Action::Revolve,
+                    "sweep" => Action::Sweep,
+                    "loft" => Action::Loft,
+                    "shell" => Action::Shell,
+                    "solidify" => Action::Solidify,
+                    "pattern" => Action::Pattern,
+                    "twist" => Action::Deform(0),
+                    "taper" => Action::Deform(1),
+                    "bend" => Action::Deform(2),
+                    "subdivide" => Action::Subdivide,
+                    "smooth" => Action::Smooth,
+                    "coil" => Action::Coil,
+                    "finish" => Action::FinishSketch,
+                    "select-last" => {
+                        app.st.scene.selected = app.st.scene.bodies.iter().rev().find(|b| !b.mesh.is_empty()).map(|b| b.id);
+                        settle(&mut app);
+                        continue;
+                    }
+                    other => return Err(format!("неизвестное действие: {other}")),
+                };
+                app.st.run_action(a);
+            }
+            "tool" => {
+                use crate::app::Tool;
+                let tl = match parts.get(1).copied().unwrap_or("") {
+                    "line" => Tool::Line,
+                    "rect" => Tool::Rectangle,
+                    "circle" => Tool::Circle,
+                    "arc" => Tool::Arc,
+                    "polygon" => Tool::Polygon,
+                    "ellipse" => Tool::Ellipse,
+                    "slot" => Tool::Slot,
+                    "spline" => Tool::Spline,
+                    "fillet" => Tool::SketchFillet,
+                    "offset" => Tool::SketchOffset,
+                    other => return Err(format!("неизвестный инструмент: {other}")),
+                };
+                app.st.run_action(Action::SetTool(tl));
+            }
+            "demo" => demo_scene(&mut app, parts.get(1).copied().unwrap_or(""))?,
             "key" => {
                 if let Some(c) = parts.get(1).and_then(|s| s.chars().next()) {
                     key(&mut app, crate::ui::Key::Char(c));
@@ -279,6 +322,66 @@ pub fn snapshot(output: &Path, files: Vec<PathBuf>, size: (usize, usize), lang: 
     let fb = app.framebuffer();
     let png = crate::renderer::canvas::encode_png(fb.width, fb.height, &fb.to_rgb8());
     std::fs::write(output, png).map_err(|e| e.to_string())
+}
+
+/// Готовые эскизы для проверки операций моделирования в снимках.
+fn demo_scene(app: &mut App, kind: &str) -> Result<(), String> {
+    use crate::math::Vec3;
+    use crate::sketch::{Sketch, SketchEntity, SketchPlane};
+    let v = |x: f32, y: f32| Vec3::new(x, y, 0.0);
+    let mut add = |name: &str, sk: Sketch| {
+        let mut sk = sk;
+        sk.name = name.to_string();
+        let mut b = crate::scene::Body::new(name, crate::mesh::Mesh::new());
+        b.sketch = Some(sk);
+        app.st.scene.add_body(b)
+    };
+    match kind {
+        // Профиль бокала на XZ и ось — отрезок по оси Z.
+        "revolve" => {
+            let mut sk = Sketch::new(SketchPlane::Xz);
+            let pts = [(0.0, 0.0), (14.0, 0.0), (14.0, 2.0), (3.0, 3.0), (2.0, 18.0), (12.0, 26.0), (13.0, 40.0), (11.0, 40.0), (10.0, 28.0), (0.0, 22.0)];
+            for i in 0..pts.len() {
+                let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+                sk.entities.push(SketchEntity::Line { a: v(a.0, a.1), b: v(b.0, b.1) });
+            }
+            add("Профиль", sk);
+        }
+        // Профиль — окружность на YZ, траектория — сплайн на XY.
+        "sweep" => {
+            let mut p = Sketch::new(SketchPlane::Yz);
+            p.entities.push(SketchEntity::Circle { center: v(0.0, 0.0), radius: 3.0 });
+            add("Профиль", p);
+            let mut path = Sketch::new(SketchPlane::Xy);
+            path.entities.push(SketchEntity::Spline { points: vec![v(0.0, 0.0), v(20.0, 12.0), v(40.0, -12.0), v(60.0, 0.0)], closed: false });
+            add("Траектория", path);
+        }
+        // Окружность внизу, шестиугольник на высоте 30.
+        "loft" => {
+            let mut a = Sketch::new(SketchPlane::Xy);
+            a.entities.push(SketchEntity::Circle { center: v(0.0, 0.0), radius: 15.0 });
+            add("Сечение 1", a);
+            let mut b = Sketch::new(SketchPlane::offset(SketchPlane::Xy, 30.0));
+            b.entities.push(SketchEntity::Polygon { center: v(0.0, 0.0), radius: 8.0, sides: 6, rotation: 0.0 });
+            add("Сечение 2", b);
+        }
+        // Все новые элементы эскиза.
+        "shapes" => {
+            let mut sk = Sketch::new(SketchPlane::Xy);
+            sk.entities.push(SketchEntity::Polygon { center: v(-30.0, 15.0), radius: 10.0, sides: 6, rotation: 0.0 });
+            sk.entities.push(SketchEntity::Ellipse { center: v(0.0, 15.0), rx: 12.0, ry: 6.0, rotation: 0.3 });
+            sk.entities.push(SketchEntity::Slot { a: v(20.0, 15.0), b: v(40.0, 15.0), radius: 5.0 });
+            sk.entities.push(SketchEntity::Spline { points: vec![v(-40.0, -15.0), v(-25.0, -5.0), v(-10.0, -25.0), v(0.0, -10.0)], closed: false });
+            sk.entities.push(SketchEntity::arc_3pt(crate::math::Vec2::new(10.0, -20.0), crate::math::Vec2::new(30.0, -20.0), crate::math::Vec2::new(20.0, -10.0)).unwrap());
+            sk.entities.push(SketchEntity::Rect { min: v(32.0, -25.0), max: v(45.0, -10.0) });
+            sk.fillet_corner(crate::math::Vec2::new(45.0, -10.0), 4.0, 0.01)?;
+            sk.offset_at(crate::math::Vec2::new(-20.0, 15.0), 1.0, 2.0)?;
+            add("Эскиз", sk);
+        }
+        other => return Err(format!("неизвестная демо-сцена: {other}")),
+    }
+    app.st.invalidate_view();
+    Ok(())
 }
 
 fn key(app: &mut App, k: crate::ui::Key) {

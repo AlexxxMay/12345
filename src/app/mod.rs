@@ -194,11 +194,56 @@ pub enum Tool {
     Line,
     Rectangle,
     Circle,
+    /// Дуга по трём точкам: начало, конец, точка на дуге.
+    Arc,
+    /// Правильный многоугольник: центр и вершина.
+    Polygon,
+    /// Эллипс: центр, конец большой оси, точка малой оси.
+    Ellipse,
+    /// Паз: центры двух концов и ширина.
+    Slot,
+    /// Сплайн через точки; Enter / ПКМ — завершить, щелчок в начало — замкнуть.
+    Spline,
+    /// Скругление угла между отрезками.
+    SketchFillet,
+    /// Смещение (эквидистанта) элемента эскиза.
+    SketchOffset,
 }
 
 impl Tool {
     pub fn is_sketch(&self) -> bool {
-        matches!(self, Tool::Line | Tool::Rectangle | Tool::Circle)
+        matches!(
+            self,
+            Tool::Line | Tool::Rectangle | Tool::Circle | Tool::Arc | Tool::Polygon | Tool::Ellipse | Tool::Slot | Tool::Spline | Tool::SketchFillet | Tool::SketchOffset
+        )
+    }
+}
+
+impl SketchSession {
+    /// Идёт многошаговая операция (есть поставленные точки).
+    pub fn busy(&self) -> bool {
+        self.anchor.is_some() || !self.pts.is_empty()
+    }
+
+    /// Сбросить текущую операцию.
+    pub fn reset_op(&mut self) {
+        self.anchor = None;
+        self.chain_start = None;
+        self.pts.clear();
+    }
+}
+
+/// Параметры инструментов эскиза (видны на панели эскиза).
+#[derive(Clone, Copy, Debug)]
+pub struct SketchParams {
+    pub polygon_sides: f32,
+    pub fillet_radius: f32,
+    pub offset: f32,
+}
+
+impl Default for SketchParams {
+    fn default() -> Self {
+        Self { polygon_sides: 6.0, fillet_radius: 2.0, offset: 2.0 }
     }
 }
 
@@ -239,6 +284,8 @@ pub struct SketchSession {
     pub anchor: Option<Vec2>,
     /// Начало цепочки линий (для замыкания).
     pub chain_start: Option<Vec2>,
+    /// Дополнительные точки многошаговых инструментов (дуга, эллипс, паз, сплайн).
+    pub pts: Vec<Vec2>,
     /// Точка под курсором (с привязкой).
     pub hover: Option<Vec2>,
     pub hover_snapped_to_point: bool,
@@ -356,7 +403,11 @@ pub struct State {
     pub status: String,
     pub frame_no: u64,
     pub mouse_cache: (f32, f32),
+    /// Параметры инструментов эскиза.
+    pub sketch_params: SketchParams,
     preview_cache: Option<(u64, Arc<DisplayMesh>, Mat4)>,
+    /// Ошибка построения предпросмотра (ключ предпросмотра, текст).
+    pub preview_error: std::cell::RefCell<Option<(u64, String)>>,
     fill_cache: HashMap<u64, Arc<DisplayMesh>>,
     info_cache: Option<(u64, u64, BodyInfo)>,
 }
@@ -426,7 +477,9 @@ impl App {
             status: String::new(),
             frame_no: 0,
             mouse_cache: (0.0, 0.0),
+            sketch_params: SketchParams::default(),
             preview_cache: None,
+            preview_error: std::cell::RefCell::new(None),
             fill_cache: HashMap::new(),
             info_cache: None,
         };
@@ -739,7 +792,8 @@ impl State {
         } else if ui.key(crate::ui::Key::Escape) {
             act = Some(Action::Escape);
         } else if ui.key(crate::ui::Key::Enter) && self.sketch.is_some() && self.dialog.is_none() {
-            act = Some(Action::FinishSketch);
+            // Enter сначала завершает сплайн, затем — эскиз.
+            act = Some(if self.tool == Tool::Spline && self.sketch.as_ref().map(|s| !s.pts.is_empty()).unwrap_or(false) { Action::SketchCommit } else { Action::FinishSketch });
         } else if ui.key(crate::ui::Key::F(1)) {
             act = Some(Action::Help);
         } else if ui.key(crate::ui::Key::Home) {
@@ -771,6 +825,12 @@ impl State {
                     act = Some(Action::SetTool(Tool::Rectangle));
                 } else if ui.plain_key('c') {
                     act = Some(Action::SetTool(Tool::Circle));
+                } else if ui.plain_key('a') {
+                    act = Some(Action::SetTool(Tool::Arc));
+                } else if ui.plain_key('o') {
+                    act = Some(Action::SetTool(Tool::Polygon));
+                } else if ui.plain_key('s') {
+                    act = Some(Action::SetTool(Tool::Spline));
                 }
             } else if ui.plain_key('r') {
                 act = Some(Action::SetTool(Tool::Rotate));

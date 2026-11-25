@@ -214,13 +214,11 @@ impl State {
             } else if input.pressed[1] {
                 if self.tool.is_sketch() {
                     // Правая кнопка — завершить цепочку.
-                    if let Some(s) = &mut self.sketch {
-                        if s.anchor.is_some() {
-                            s.anchor = None;
-                            s.chain_start = None;
-                        } else {
-                            self.drag = Some(Drag::Pending { button: 1, start: (mx, my) });
-                        }
+                    let busy = self.sketch.as_ref().map(|s| s.busy()).unwrap_or(false);
+                    if busy {
+                        self.sketch_commit();
+                    } else {
+                        self.drag = Some(Drag::Pending { button: 1, start: (mx, my) });
                     }
                 } else {
                     self.drag = Some(Drag::Pending { button: 1, start: (mx, my) });
@@ -624,6 +622,7 @@ impl State {
             sketch,
             anchor: None,
             chain_start: None,
+            pts: Vec::new(),
             hover: None,
             hover_snapped_to_point: false,
             prev_camera: prev,
@@ -691,11 +690,20 @@ impl State {
         }
     }
 
+    /// Допуск выбора на эскизе в мировых единицах (~10 px).
+    fn sketch_pick_tol(&self) -> f32 {
+        self.world_per_px(self.cam.target) * 10.0 * self.scale * self.cfg.ui_scale
+    }
+
     fn sketch_click(&mut self) {
         let tool = self.tool;
+        let params = self.sketch_params;
+        let tol = self.sketch_pick_tol();
+        let mut err: Option<String> = None;
         let Some(sess) = &mut self.sketch else { return };
         let Some(p) = sess.hover else { return };
         let v3 = |q: Vec2| Vec3::new(q.x, q.y, 0.0);
+        let same = |a: Vec2, b: Vec2| a.distance(b) < 1e-6;
         match tool {
             Tool::Line => match sess.anchor {
                 None => {
@@ -703,42 +711,88 @@ impl State {
                     sess.chain_start = Some(p);
                 }
                 Some(a) => {
-                    if a.distance(p) > 1e-6 {
+                    if !same(a, p) {
                         sess.sketch.entities.push(SketchEntity::Line { a: v3(a), b: v3(p) });
-                        if sess.chain_start.map(|c| c.distance(p) < 1e-6).unwrap_or(false) {
+                        if sess.chain_start.map(|c| same(c, p)).unwrap_or(false) {
                             // Контур замкнут.
-                            sess.anchor = None;
-                            sess.chain_start = None;
+                            sess.reset_op();
                         } else {
                             sess.anchor = Some(p);
                         }
                     }
                 }
             },
-            Tool::Rectangle => match sess.anchor {
+            // Два щелчка.
+            Tool::Rectangle | Tool::Circle | Tool::Polygon => match sess.anchor {
                 None => sess.anchor = Some(p),
                 Some(a) => {
-                    if (a.x - p.x).abs() > 1e-6 && (a.y - p.y).abs() > 1e-6 {
-                        let min = Vec3::new(a.x.min(p.x), a.y.min(p.y), 0.0);
-                        let max = Vec3::new(a.x.max(p.x), a.y.max(p.y), 0.0);
-                        sess.sketch.entities.push(SketchEntity::Rect { min, max });
+                    if let Some(e) = pending_entity(tool, Some(a), &sess.pts, p, &params) {
+                        if entity_valid(&e) {
+                            sess.sketch.entities.push(e);
+                        }
                     }
-                    sess.anchor = None;
+                    sess.reset_op();
                 }
             },
-            Tool::Circle => match sess.anchor {
+            // Три щелчка.
+            Tool::Arc | Tool::Ellipse | Tool::Slot => match sess.anchor {
                 None => sess.anchor = Some(p),
-                Some(c) => {
-                    let r = c.distance(p);
-                    if r > 1e-6 {
-                        sess.sketch.entities.push(SketchEntity::Circle { center: v3(c), radius: r });
+                Some(a) if sess.pts.is_empty() => {
+                    if !same(a, p) {
+                        sess.pts.push(p);
                     }
-                    sess.anchor = None;
+                }
+                Some(a) => {
+                    if let Some(e) = pending_entity(tool, Some(a), &sess.pts, p, &params) {
+                        if entity_valid(&e) {
+                            sess.sketch.entities.push(e);
+                        }
+                    }
+                    sess.reset_op();
                 }
             },
+            Tool::Spline => {
+                if sess.pts.len() >= 3 && same(sess.pts[0], p) {
+                    let points = sess.pts.iter().map(|q| v3(*q)).collect();
+                    sess.sketch.entities.push(SketchEntity::Spline { points, closed: true });
+                    sess.reset_op();
+                } else if sess.pts.last().map_or(true, |q| !same(*q, p)) {
+                    sess.pts.push(p);
+                    sess.anchor = Some(sess.pts[0]);
+                    sess.chain_start = Some(sess.pts[0]);
+                }
+            }
+            Tool::SketchFillet => {
+                if let Err(e) = sess.sketch.fillet_corner(p, params.fillet_radius, tol) {
+                    err = Some(e);
+                }
+            }
+            Tool::SketchOffset => {
+                if let Err(e) = sess.sketch.offset_at(p, tol, params.offset) {
+                    err = Some(e);
+                }
+            }
             _ => {}
         }
+        if let Some(e) = err {
+            let msg = if super::lang_en() { sketch_error_en(&e) } else { e };
+            self.toast(msg, true);
+        }
         self.invalidate_view();
+    }
+
+    /// Завершить многошаговую операцию (ПКМ / Enter): сплайн сохраняется,
+    /// остальные операции сбрасываются.
+    pub fn sketch_commit(&mut self) {
+        let tool = self.tool;
+        if let Some(sess) = &mut self.sketch {
+            if tool == Tool::Spline && sess.pts.len() >= 2 {
+                let points = sess.pts.iter().map(|q| Vec3::new(q.x, q.y, 0.0)).collect();
+                sess.sketch.entities.push(SketchEntity::Spline { points, closed: false });
+            }
+            sess.reset_op();
+            self.invalidate_view();
+        }
     }
 
     /// Линии эскизов для 3D-наложения.
@@ -788,34 +842,42 @@ impl State {
                 out.push(Line3 { a, b: c, color: col, width: 1.8, depth_test: false });
             }
             // Предпросмотр текущей операции.
-            if let (Some(a), Some(h)) = (sess.anchor, sess.hover) {
+            if let Some(h) = sess.hover {
                 let pc = 0xFFF0_8A24;
                 let w = |q: Vec2| plane.to_world(q);
-                match self.tool {
-                    Tool::Line => out.push(Line3 { a: w(a), b: w(h), color: pc, width: 1.8, depth_test: false }),
-                    Tool::Rectangle => {
-                        let pts = [a, Vec2::new(h.x, a.y), h, Vec2::new(a.x, h.y)];
-                        for i in 0..4 {
-                            out.push(Line3 { a: w(pts[i]), b: w(pts[(i + 1) % 4]), color: pc, width: 1.8, depth_test: false });
-                        }
+                if let Some(e) = pending_entity(self.tool, sess.anchor, &sess.pts, h, &self.sketch_params) {
+                    let (pts, closed) = e.polyline();
+                    for i in 1..pts.len() {
+                        out.push(Line3 { a: w(pts[i - 1]), b: w(pts[i]), color: pc, width: 1.8, depth_test: false });
                     }
-                    Tool::Circle => {
-                        let r = a.distance(h);
-                        let segs = 64;
-                        for i in 0..segs {
-                            let a0 = i as f32 / segs as f32 * std::f32::consts::TAU;
-                            let a1 = (i + 1) as f32 / segs as f32 * std::f32::consts::TAU;
-                            out.push(Line3 {
-                                a: w(Vec2::new(a.x + r * a0.cos(), a.y + r * a0.sin())),
-                                b: w(Vec2::new(a.x + r * a1.cos(), a.y + r * a1.sin())),
-                                color: pc,
-                                width: 1.8,
-                                depth_test: false,
-                            });
+                    if closed && pts.len() > 2 {
+                        out.push(Line3 { a: w(pts[pts.len() - 1]), b: w(pts[0]), color: pc, width: 1.8, depth_test: false });
+                    }
+                }
+                // Вспомогательные линии: радиус, ось эллипса, опорные точки сплайна.
+                let guide = 0x80F0_8A24;
+                match (self.tool, sess.anchor) {
+                    (Tool::Circle | Tool::Polygon, Some(a)) => out.push(Line3 { a: w(a), b: w(h), color: guide, width: 1.0, depth_test: false }),
+                    (Tool::Ellipse | Tool::Slot | Tool::Arc, Some(a)) if !sess.pts.is_empty() => out.push(Line3 { a: w(a), b: w(sess.pts[0]), color: guide, width: 1.0, depth_test: false }),
+                    (Tool::Spline, _) => {
+                        for i in 1..sess.pts.len() {
+                            out.push(Line3 { a: w(sess.pts[i - 1]), b: w(sess.pts[i]), color: guide, width: 1.0, depth_test: false });
                         }
-                        out.push(Line3 { a: w(a), b: w(h), color: 0x80F0_8A24, width: 1.0, depth_test: false });
                     }
                     _ => {}
+                }
+                // Подсветка элемента под курсором для смещения.
+                if self.tool == Tool::SketchOffset {
+                    if let Some(i) = sess.sketch.nearest_entity(h, self.sketch_pick_tol()) {
+                        let (pts, closed) = sess.sketch.entities[i].polyline();
+                        let hc = 0xFF2F_7FD8;
+                        for k in 1..pts.len() {
+                            out.push(Line3 { a: w(pts[k - 1]), b: w(pts[k]), color: hc, width: 2.6, depth_test: false });
+                        }
+                        if closed && pts.len() > 2 {
+                            out.push(Line3 { a: w(pts[pts.len() - 1]), b: w(pts[0]), color: hc, width: 2.6, depth_test: false });
+                        }
+                    }
                 }
             }
         }
@@ -837,11 +899,23 @@ impl State {
                 let col = if sess.hover_snapped_to_point { 0xFF2E_9E5B } else { 0xFFF0_8A24 };
                 ui.fb.stroke_circle(p.0, p.1, 5.0 * s, 1.6 * s, col);
                 // Подпись размера.
-                let txt = match (self.tool, sess.anchor) {
-                    (Tool::Line, Some(a)) => format!("{} {}", crate::ui::fmt_num(a.distance(h)), t("мм", "mm")),
-                    (Tool::Rectangle, Some(a)) => format!("{} × {}", crate::ui::fmt_num((h.x - a.x).abs()), crate::ui::fmt_num((h.y - a.y).abs())),
-                    (Tool::Circle, Some(a)) => format!("⌀ {}", crate::ui::fmt_num(a.distance(h) * 2.0)),
-                    _ => format!("{}, {}", crate::ui::fmt_num(h.x), crate::ui::fmt_num(h.y)),
+                let f = crate::ui::fmt_num;
+                let pending = pending_entity(self.tool, sess.anchor, &sess.pts, h, &self.sketch_params);
+                let txt = match (self.tool, sess.anchor, &pending) {
+                    (Tool::Line, Some(a), _) => format!("{} {}", f(a.distance(h)), t("мм", "mm")),
+                    (Tool::Rectangle, Some(a), _) => format!("{} × {}", f((h.x - a.x).abs()), f((h.y - a.y).abs())),
+                    (Tool::Circle, Some(a), _) => format!("⌀ {}", f(a.distance(h) * 2.0)),
+                    (_, _, Some(SketchEntity::Arc { radius, start_angle, end_angle, .. })) => {
+                        format!("R {}  {}°", f(*radius), f(crate::sketch::arc_sweep(*start_angle, *end_angle) * crate::math::RAD2DEG))
+                    }
+                    (_, _, Some(SketchEntity::Polygon { radius, sides, .. })) => format!("{}  R {}", sides, f(*radius)),
+                    (_, _, Some(SketchEntity::Ellipse { rx, ry, .. })) => format!("{} × {}", f(rx * 2.0), f(ry * 2.0)),
+                    (_, _, Some(SketchEntity::Slot { a, b, radius })) => format!("{} × {}", f(a.distance(*b) + radius * 2.0), f(radius * 2.0)),
+                    (Tool::Spline, _, _) if !sess.pts.is_empty() => format!("{}: {}", t("точек", "points"), sess.pts.len() + 1),
+                    (Tool::SketchFillet, _, _) => format!("R {}", f(self.sketch_params.fillet_radius)),
+                    (Tool::SketchOffset, _, _) => format!("{} {}", f(self.sketch_params.offset), t("мм", "mm")),
+                    (_, Some(a), _) => format!("{} {}", f(a.distance(h)), t("мм", "mm")),
+                    _ => format!("{}, {}", f(h.x), f(h.y)),
                 };
                 label_box(ui, p.0 + 14.0 * s, p.1 + 12.0 * s, &txt, theme::LABEL_BG(), theme::TEXT());
             }
@@ -972,24 +1046,28 @@ impl State {
     fn render_3d(&mut self, rs: f32, navigating: bool, preview_key: Option<u64>) {
         let bounds = self.scene_bounds();
         self.cam.update_clip(&bounds);
-        let mut meshes: Vec<(usize, Arc<DisplayMesh>)> = Vec::new();
-        let editing = self.sketch.as_ref().and_then(|s| s.body_id);
-        for i in 0..self.scene.bodies.len() {
-            let b = &self.scene.bodies[i];
-            if !b.visible || Some(b.id) == editing {
-                continue;
-            }
-            if let Some(dm) = self.display_mesh(i) {
-                meshes.push((i, dm));
-            }
-        }
         // Предпросмотр команды.
         let mut preview: Option<(Arc<DisplayMesh>, Mat4)> = None;
         if let Some(pk) = preview_key {
             if self.preview_cache.as_ref().map(|(k, _, _)| *k) != Some(pk) {
                 self.preview_cache = self.dialog.as_ref().and_then(|d| d.build_preview(self)).map(|(m, tf)| (pk, Arc::new(DisplayMesh::build(&m, false, 35.0)), tf));
+                // Перерисовать панель диалога: могла появиться или исчезнуть ошибка.
+                self.wake_ms = Some(0);
             }
             preview = self.preview_cache.as_ref().map(|(_, dm, tf)| (dm.clone(), *tf));
+        }
+        let mut meshes: Vec<(usize, Arc<DisplayMesh>)> = Vec::new();
+        let editing = self.sketch.as_ref().and_then(|s| s.body_id);
+        // Тело, изменяемое диалогом на месте, скрываем, пока виден предпросмотр.
+        let hidden = if preview.is_some() { self.dialog.as_ref().and_then(|d| d.hides_body()) } else { None };
+        for i in 0..self.scene.bodies.len() {
+            let b = &self.scene.bodies[i];
+            if !b.visible || Some(b.id) == editing || (hidden.is_some() && Some(b.id) == hidden) {
+                continue;
+            }
+            if let Some(dm) = self.display_mesh(i) {
+                meshes.push((i, dm));
+            }
         }
         // Заливка профилей эскизов.
         let mut fills: Vec<(Arc<DisplayMesh>, Mat4)> = Vec::new();
@@ -1151,7 +1229,7 @@ impl State {
                 t("Эскиз", "Sketch"),
                 sess.sketch.name,
                 t("плоскость", "plane"),
-                sess.sketch.plane.name(),
+                sess.sketch.plane.label(),
                 t("Enter — завершить, Esc — отмена операции, Shift — без привязки", "Enter — finish, Esc — cancel op, Shift — no snap")
             );
             let tw = ui.text_width(&txt, 12.0) + 24.0 * s;
@@ -1282,9 +1360,8 @@ impl State {
             return;
         }
         if let Some(sess) = &mut self.sketch {
-            if sess.anchor.is_some() {
-                sess.anchor = None;
-                sess.chain_start = None;
+            if sess.busy() {
+                sess.reset_op();
                 self.invalidate_view();
                 return;
             }
@@ -1314,36 +1391,91 @@ impl State {
     }
 }
 
+/// Элемент, который получится при щелчке в точке `h` (для предпросмотра и фиксации).
+pub fn pending_entity(tool: Tool, anchor: Option<Vec2>, pts: &[Vec2], h: Vec2, params: &super::SketchParams) -> Option<SketchEntity> {
+    let v3 = |q: Vec2| Vec3::new(q.x, q.y, 0.0);
+    let line_dist = |a: Vec2, b: Vec2, p: Vec2| -> f32 {
+        let d = (b - a).normalize();
+        ((p - a).x * d.y - (p - a).y * d.x).abs()
+    };
+    match tool {
+        Tool::Line => anchor.map(|a| SketchEntity::Line { a: v3(a), b: v3(h) }),
+        Tool::Rectangle => anchor.map(|a| SketchEntity::Rect { min: Vec3::new(a.x.min(h.x), a.y.min(h.y), 0.0), max: Vec3::new(a.x.max(h.x), a.y.max(h.y), 0.0) }),
+        Tool::Circle => anchor.map(|a| SketchEntity::Circle { center: v3(a), radius: a.distance(h) }),
+        Tool::Polygon => anchor.map(|a| SketchEntity::Polygon { center: v3(a), radius: a.distance(h), sides: (params.polygon_sides.round() as u32).clamp(3, 64), rotation: (h.y - a.y).atan2(h.x - a.x) }),
+        Tool::Arc => {
+            let a = anchor?;
+            match pts.first() {
+                None => Some(SketchEntity::Line { a: v3(a), b: v3(h) }),
+                Some(&b) => SketchEntity::arc_3pt(a, b, h).or(Some(SketchEntity::Line { a: v3(a), b: v3(b) })),
+            }
+        }
+        Tool::Ellipse => {
+            let a = anchor?;
+            match pts.first() {
+                None => Some(SketchEntity::Line { a: v3(a * 2.0 - h), b: v3(h) }),
+                Some(&b) => Some(SketchEntity::Ellipse { center: v3(a), rx: a.distance(b), ry: line_dist(a, b, h).max(1e-4), rotation: (b.y - a.y).atan2(b.x - a.x) }),
+            }
+        }
+        Tool::Slot => {
+            let a = anchor?;
+            match pts.first() {
+                None => Some(SketchEntity::Line { a: v3(a), b: v3(h) }),
+                Some(&b) => Some(SketchEntity::Slot { a: v3(a), b: v3(b), radius: line_dist(a, b, h).max(1e-4) }),
+            }
+        }
+        Tool::Spline => {
+            if pts.is_empty() {
+                return None;
+            }
+            let mut p: Vec<Vec3> = pts.iter().map(|q| v3(*q)).collect();
+            p.push(v3(h));
+            Some(SketchEntity::Spline { points: p, closed: false })
+        }
+        _ => None,
+    }
+}
+
+/// Элемент не вырожден (ненулевые размеры).
+fn entity_valid(e: &SketchEntity) -> bool {
+    let eps = 1e-6;
+    match e {
+        SketchEntity::Line { a, b } => a.distance(*b) > eps,
+        SketchEntity::Rect { min, max } => max.x - min.x > eps && max.y - min.y > eps,
+        SketchEntity::Circle { radius, .. } | SketchEntity::Polygon { radius, .. } | SketchEntity::Arc { radius, .. } => *radius > eps,
+        SketchEntity::Ellipse { rx, ry, .. } => *rx > eps && *ry > 1e-3,
+        SketchEntity::Slot { a, b, radius } => a.distance(*b) > eps && *radius > 1e-3,
+        SketchEntity::Spline { points, .. } => points.len() >= 2,
+    }
+}
+
+/// Перевод сообщений об ошибках эскиза.
+fn sketch_error_en(e: &str) -> String {
+    match e {
+        "радиус должен быть больше нуля" => "Radius must be positive",
+        "щёлкните по углу, где сходятся ровно два отрезка" => "Click a corner where exactly two lines meet",
+        "отрезки на одной прямой — скруглять нечего" => "The lines are collinear — nothing to fillet",
+        "радиус слишком большой для этих отрезков" => "The radius is too large for these lines",
+        "щёлкните по линии эскиза" => "Click a sketch curve",
+        "расстояние должно быть ненулевым" => "Distance must be non-zero",
+        "слишком большое смещение внутрь" => "The inward offset is too large",
+        other => other,
+    }
+    .to_string()
+}
+
 /// Отрезки эскиза в мировых координатах (без трансформации тела).
 pub fn sketch_segments(sk: &crate::sketch::Sketch) -> Vec<(Vec3, Vec3)> {
     let plane = sk.plane;
-    let w = |x: f32, y: f32| plane.to_world(Vec2::new(x, y));
     let mut out = Vec::new();
     for e in &sk.entities {
-        match *e {
-            SketchEntity::Line { a, b } => out.push((w(a.x, a.y), w(b.x, b.y))),
-            SketchEntity::Rect { min, max } => {
-                let p = [w(min.x, min.y), w(max.x, min.y), w(max.x, max.y), w(min.x, max.y)];
-                for i in 0..4 {
-                    out.push((p[i], p[(i + 1) % 4]));
-                }
-            }
-            SketchEntity::Circle { center, radius } => {
-                let n = 64;
-                for i in 0..n {
-                    let a0 = i as f32 / n as f32 * std::f32::consts::TAU;
-                    let a1 = (i + 1) as f32 / n as f32 * std::f32::consts::TAU;
-                    out.push((w(center.x + radius * a0.cos(), center.y + radius * a0.sin()), w(center.x + radius * a1.cos(), center.y + radius * a1.sin())));
-                }
-            }
-            SketchEntity::Arc { center, radius, start_angle, end_angle } => {
-                let n = 32;
-                for i in 0..n {
-                    let a0 = start_angle + (end_angle - start_angle) * i as f32 / n as f32;
-                    let a1 = start_angle + (end_angle - start_angle) * (i + 1) as f32 / n as f32;
-                    out.push((w(center.x + radius * a0.cos(), center.y + radius * a0.sin()), w(center.x + radius * a1.cos(), center.y + radius * a1.sin())));
-                }
-            }
+        let (pts, closed) = e.polyline();
+        let w: Vec<Vec3> = pts.iter().map(|p| plane.to_world(*p)).collect();
+        for i in 1..w.len() {
+            out.push((w[i - 1], w[i]));
+        }
+        if closed && w.len() > 2 {
+            out.push((w[w.len() - 1], w[0]));
         }
     }
     out
