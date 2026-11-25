@@ -5,7 +5,7 @@
 //! alphacad info <файл>                      — сведения о модели
 //! alphacad convert <вход> <выход> [--ascii] — конвертация форматов
 //! alphacad snapshot <выход.png> [файлы…] [--size WxH] [--lang ru|en] [--theme light|dark]
-//!          [--render cpu|gpu] [--require-gpu] [--script a,b,…]
+//!          [--font standard|engineering] [--render cpu|gpu] [--require-gpu] [--script a,b,…]
 //!                                           — снимок интерфейса без окна
 //! ```
 
@@ -75,6 +75,10 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                         i += 1;
                         opts.dark = Some(args.get(i).map(|s| s == "dark").unwrap_or(false));
                     }
+                    "--font" => {
+                        i += 1;
+                        opts.engineering_font = Some(args.get(i).map(|s| s == "engineering" || s == "eng").unwrap_or(false));
+                    }
                     "--render" => {
                         i += 1;
                         opts.gpu = Some(args.get(i).map(|s| s == "gpu").unwrap_or(false));
@@ -110,8 +114,8 @@ pub const HELP: &str = "AlphaCad — лёгкий 3D CAD-редактор (STL, 
   alphacad info <файл>                       сведения о модели
   alphacad convert <вход> <выход> [--ascii]  конвертация (формат по расширению)
   alphacad snapshot <out.png> [файлы…] [--size WxH] [--lang ru|en]
-           [--theme light|dark] [--render cpu|gpu] [--require-gpu]
-                                             снимок интерфейса без окна
+           [--theme light|dark] [--font standard|engineering]
+           [--render cpu|gpu] [--require-gpu] снимок интерфейса без окна
   alphacad --version";
 
 /// Дополнительные параметры снимка.
@@ -123,6 +127,8 @@ pub struct SnapshotOpts {
     pub gpu: Option<bool>,
     /// Ошибка, если видеокарта недоступна (для проверки в CI).
     pub require_gpu: bool,
+    /// Инженерный шрифт интерфейса.
+    pub engineering_font: Option<bool>,
 }
 
 /// Выполнение консольной команды. Возвращает код выхода.
@@ -193,6 +199,9 @@ pub fn snapshot(output: &Path, files: Vec<PathBuf>, size: (usize, usize), lang: 
     }
     if let Some(gpu) = opts.gpu {
         app.st.cfg.gpu = gpu;
+    }
+    if let Some(f) = opts.engineering_font {
+        app.st.cfg.engineering_font = f;
     }
     app.event(Event::Resize { width: size.0, height: size.1, scale: 1.0 });
     app.frame();

@@ -77,6 +77,8 @@ pub struct Config {
     pub dark_theme: bool,
     /// Рендер 3D на видеокарте (OpenGL); иначе — на процессоре.
     pub gpu: bool,
+    /// Инженерный шрифт интерфейса (ISOCPEUR / ISO 3098).
+    pub engineering_font: bool,
 }
 
 impl Default for Config {
@@ -95,6 +97,7 @@ impl Default for Config {
             dark_bg: false,
             dark_theme: false,
             gpu: false,
+            engineering_font: false,
         }
     }
 }
@@ -121,6 +124,7 @@ impl Config {
                 "dark_bg" => c.dark_bg = v == "1",
                 "theme" => c.dark_theme = v == "dark",
                 "renderer" => c.gpu = v == "gpu",
+                "font" => c.engineering_font = v == "engineering",
                 "crease" => c.crease_deg = v.parse().unwrap_or(35.0f32).clamp(1.0, 89.0),
                 "mode" => {
                     c.mode = match v {
@@ -152,6 +156,7 @@ impl Config {
         s.push_str(&format!("dark_bg={}\n", self.dark_bg as u8));
         s.push_str(&format!("theme={}\n", if self.dark_theme { "dark" } else { "light" }));
         s.push_str(&format!("renderer={}\n", if self.gpu { "gpu" } else { "cpu" }));
+        s.push_str(&format!("font={}\n", if self.engineering_font { "engineering" } else { "standard" }));
         s.push_str(&format!("crease={}\n", self.crease_deg));
         s.push_str(&format!(
             "mode={}\n",
@@ -342,6 +347,8 @@ pub struct State {
     pub gpu: Option<crate::renderer::gpu::GpuRenderer>,
     /// Причина, по которой GPU недоступен (рендер идёт на CPU).
     pub gpu_error: Option<String>,
+    /// Источник текущего шрифта интерфейса (для строки в настройках).
+    pub font_source: String,
     pub last_tris: usize,
     pub navigating_until: Option<Instant>,
     pub rename: Option<(u64, String)>,
@@ -369,6 +376,8 @@ pub struct BodyInfo {
 pub struct App {
     fb: Framebuffer,
     font: Font,
+    /// Какой шрифт сейчас загружен (сравнивается с настройкой каждый кадр).
+    font_engineering: bool,
     input: Input,
     ui: UiState,
     pub st: State,
@@ -409,6 +418,7 @@ impl App {
             last_render_ms: 0.0,
             gpu: None,
             gpu_error: None,
+            font_source: String::new(),
             last_tris: 0,
             navigating_until: None,
             rename: None,
@@ -420,13 +430,35 @@ impl App {
             fill_cache: HashMap::new(),
             info_cache: None,
         };
-        App { fb: Framebuffer::new(1280, 800), font: Font::builtin(), input: Input::default(), ui: UiState::default(), st }
+        let font_engineering = st.cfg.engineering_font;
+        let font = load_ui_font(font_engineering);
+        let mut app = App { fb: Framebuffer::new(1280, 800), font, font_engineering, input: Input::default(), ui: UiState::default(), st };
+        app.st.font_source = app.font.source.clone();
+        app
+    }
+
+    /// Смена шрифта, если её запросили в настройках.
+    fn sync_font(&mut self) {
+        if self.st.cfg.engineering_font != self.font_engineering {
+            self.font_engineering = self.st.cfg.engineering_font;
+            self.font = load_ui_font(self.font_engineering);
+            self.st.font_source = self.font.source.clone();
+            self.st.view_key = 0;
+        }
     }
 
     /// Доступ к кадровому буферу (для скриншотов в CLI/тестах).
     pub fn fb(&self) -> &Framebuffer {
         &self.fb
     }
+}
+
+/// Шрифт интерфейса. Для инженерного ISOCPEUR ищется также в папке настроек
+/// (`<config>/fonts/ISOCPEUR.ttf`) — туда можно положить свой файл шрифта.
+fn load_ui_font(engineering: bool) -> Font {
+    use crate::ui::font::FontChoice;
+    let dirs = [crate::platform::config_dir().join("fonts"), crate::platform::config_dir()];
+    Font::for_choice(if engineering { FontChoice::Engineering } else { FontChoice::Standard }, &dirs)
 }
 
 impl Handler for App {
@@ -458,6 +490,7 @@ impl Handler for App {
     }
 
     fn frame(&mut self) -> FrameOutput {
+        self.sync_font();
         let s = self.st.scale * self.st.cfg.ui_scale;
         self.st.wake_ms = None;
         let mut ui = Ui::new(&mut self.fb, &self.font, &self.input, &mut self.ui, s);

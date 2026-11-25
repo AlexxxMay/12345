@@ -344,7 +344,7 @@ impl State {
         ui.region(full);
         ui.fb.fill_rect(full, theme::MODAL_DIM());
         let (w, h) = match &d {
-            Dialog::Settings => (500.0, 545.0),
+            Dialog::Settings => (500.0, 595.0),
             Dialog::Help => (640.0, 490.0),
             Dialog::Info { .. } => (420.0, 340.0),
             Dialog::Message { text, .. } => (440.0, 150.0 + 18.0 * (text.len() as f32 / 50.0).ceil()),
@@ -392,6 +392,21 @@ impl State {
                     self.invalidate_view();
                 }
                 y += row;
+                let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Шрифт", "Font"), lw);
+                let mut fi = self.cfg.engineering_font as usize;
+                let note_x = fr.x;
+                if ui.segmented(id_of("set_font"), fr, &[t("Стандартный", "Standard"), t("Инженерный", "Engineering")], &mut fi) {
+                    self.cfg.engineering_font = fi == 1;
+                    self.invalidate_view();
+                }
+                y += 24.0 * s;
+                let font_note = if self.cfg.engineering_font && !self.font_source.starts_with("ISOCPEUR") {
+                    format!("{} {}", t("ISOCPEUR не найден в системе — используется аналог", "ISOCPEUR not found — using the look-alike"), self.font_source)
+                } else {
+                    self.font_source.clone()
+                };
+                ui.text_in(Rect::new(note_x, y, x0 + w0 - note_x, 18.0 * s), &font_note, 11.0, theme::TEXT_DIM(), 0);
+                y += 26.0 * s;
                 let fr = ui.labeled(Rect::new(x0, y, w0, 26.0 * s), t("Масштаб интерфейса", "Interface scale"), lw);
                 let scales = [0.9f32, 1.0, 1.25, 1.5];
                 let mut si = scales.iter().position(|v| (v - self.cfg.ui_scale).abs() < 0.01).unwrap_or(1);

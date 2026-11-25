@@ -1,7 +1,15 @@
 //! Минимальный движок TrueType: разбор `cmap`/`glyf`/`hmtx` и растеризация
 //! глифов с аналитическим сглаживанием при любом размере (поддержка HiDPI).
 //!
-//! Встроенный шрифт — подмножество DejaVu Sans (латиница, кириллица, символы).
+//! Встроенные шрифты:
+//! - «Стандартный» — подмножество DejaVu Sans (латиница, кириллица, символы);
+//! - «Инженерный» — ISOCPEUR из системы (ставится с AutoCAD, КОМПАС, nanoCAD
+//!   и др.; лицензия Autodesk не позволяет встраивать его в программу), а если
+//!   его нет — встроенный свободный аналог по ISO 3098 (osifont, LGPL v3).
+//!
+//! Метрики любого внешнего шрифта приводятся к стандартному по высоте прописных
+//! букв: при одинаковом кегле буквы одного роста и разметка интерфейса не плывёт.
+//! Недостающие в шрифте символы (стрелки, галочки) берутся из стандартного.
 
 use crate::renderer::canvas::{Coverage, Framebuffer};
 use std::cell::RefCell;
@@ -9,6 +17,22 @@ use std::collections::HashMap;
 
 /// Встроенный шрифт интерфейса.
 pub static UI_FONT_DATA: &[u8] = include_bytes!("../../assets/fonts/ui.ttf");
+
+/// Встроенный инженерный шрифт (osifont, ISO 3098; см. assets/fonts/LICENSE-osifont.txt).
+pub static ENGINEERING_FONT_DATA: &[u8] = include_bytes!("../../assets/fonts/engineering.ttf");
+
+/// Высота прописной «H» стандартного шрифта в долях кегля (DejaVu Sans: 1493/2048).
+const REF_CAP_EM: f32 = 1493.0 / 2048.0;
+/// Подъём и спуск стандартного шрифта относительно высоты прописных.
+const REF_ASCENT_CAP: f32 = 1901.0 / 1493.0;
+const REF_DESCENT_CAP: f32 = 483.0 / 1493.0;
+
+/// Шрифт интерфейса, выбираемый в настройках.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FontChoice {
+    Standard,
+    Engineering,
+}
 
 #[derive(Clone, Copy, Debug)]
 enum Seg {
@@ -42,6 +66,12 @@ pub struct Font {
     off_hmtx: usize,
     cmap: HashMap<u32, u16>,
     cache: RefCell<HashMap<(char, u32), GlyphBitmap>>,
+    /// Множитель кегля (выравнивание высоты прописных со стандартным шрифтом).
+    size_scale: f32,
+    /// Шрифт для символов, которых нет в этом.
+    fallback: Option<Box<Font>>,
+    /// Откуда загружен шрифт (для настроек).
+    pub source: String,
 }
 
 fn rd_u16(d: &[u8], o: usize) -> u16 {
@@ -129,12 +159,67 @@ impl Font {
             off_hmtx: t(b"hmtx")?,
             cmap,
             cache: RefCell::new(HashMap::new()),
+            size_scale: 1.0,
+            fallback: None,
+            source: String::new(),
         })
     }
 
     /// Встроенный шрифт интерфейса.
     pub fn builtin() -> Font {
-        Font::load(UI_FONT_DATA).expect("встроенный шрифт повреждён")
+        let mut f = Font::load(UI_FONT_DATA).expect("встроенный шрифт повреждён");
+        f.source = "DejaVu Sans".into();
+        f
+    }
+
+    /// Шрифт по выбору пользователя. `extra_dirs` — дополнительные папки поиска
+    /// ISOCPEUR (например, папка настроек программы).
+    pub fn for_choice(choice: FontChoice, extra_dirs: &[std::path::PathBuf]) -> Font {
+        match choice {
+            FontChoice::Standard => Font::builtin(),
+            FontChoice::Engineering => Font::engineering(extra_dirs),
+        }
+    }
+
+    /// Инженерный шрифт: системный ISOCPEUR или встроенный osifont.
+    pub fn engineering(extra_dirs: &[std::path::PathBuf]) -> Font {
+        for path in isocpeur_candidates(extra_dirs) {
+            let Ok(bytes) = std::fs::read(&path) else { continue };
+            // Шрифт живёт до конца работы программы; переключение туда-обратно
+            // загружает его заново лишь при повторном выборе.
+            let data: &'static [u8] = Box::leak(bytes.into_boxed_slice());
+            if let Ok(f) = Font::load_external(data) {
+                if "АБВЖабвжHx0".chars().all(|c| f.cmap.contains_key(&(c as u32))) {
+                    let mut f = f;
+                    f.source = format!("ISOCPEUR ({})", path.display());
+                    return f;
+                }
+            }
+        }
+        let mut f = Font::load_external(ENGINEERING_FONT_DATA).expect("встроенный инженерный шрифт повреждён");
+        f.source = "osifont (ISO 3098)".into();
+        f
+    }
+
+    /// Внешний шрифт: метрики приводятся к стандартному, недостающие символы —
+    /// из стандартного шрифта.
+    pub fn load_external(data: &'static [u8]) -> Result<Font, String> {
+        let mut f = Font::load(data)?;
+        let cap = f.cmap.get(&('H' as u32)).and_then(|&g| f.glyph_range(g)).map(|(start, _)| rd_i16(f.data, start + 8) as f32).filter(|&c| c > 0.0).ok_or("в шрифте нет буквы H")?;
+        f.size_scale = (REF_CAP_EM / (cap / f.units_per_em)).clamp(0.5, 2.0);
+        f.ascent = cap * REF_ASCENT_CAP;
+        f.descent = -cap * REF_DESCENT_CAP;
+        f.line_gap = 0.0;
+        f.fallback = Some(Box::new(Font::builtin()));
+        Ok(f)
+    }
+
+    /// Шрифт, которым рисуется символ (свой или запасной).
+    fn pick(&self, ch: char) -> &Font {
+        match &self.fallback {
+            Some(fb) if !self.cmap.contains_key(&(ch as u32)) && fb.cmap.contains_key(&(ch as u32)) => fb,
+            _ => self,
+        }
     }
 
     fn glyph_index(&self, ch: char) -> u16 {
@@ -325,7 +410,7 @@ impl Font {
 
     fn rasterize(&self, ch: char, px: f32) -> GlyphBitmap {
         let g = self.glyph_index(ch);
-        let scale = px / self.units_per_em;
+        let scale = px * self.size_scale / self.units_per_em;
         let advance = self.advance_units(g) * scale;
         let mut segs = Vec::new();
         self.outline(g, 0, &mut segs, [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
@@ -376,7 +461,8 @@ impl Font {
 
     /// Ширина символа.
     pub fn advance(&self, ch: char, px: f32) -> f32 {
-        self.advance_units(self.glyph_index(ch)) * px / self.units_per_em
+        let f = self.pick(ch);
+        f.advance_units(f.glyph_index(ch)) * px * f.size_scale / f.units_per_em
     }
 
     /// Ширина строки в пикселях.
@@ -386,12 +472,12 @@ impl Font {
 
     /// Высота подъёма над базовой линией.
     pub fn ascent(&self, px: f32) -> f32 {
-        self.ascent * px / self.units_per_em
+        self.ascent * px * self.size_scale / self.units_per_em
     }
 
     /// Межстрочный интервал.
     pub fn line_height(&self, px: f32) -> f32 {
-        (self.ascent - self.descent + self.line_gap) * px / self.units_per_em
+        (self.ascent - self.descent + self.line_gap) * px * self.size_scale / self.units_per_em
     }
 
     /// Рисование строки. `(x, y)` — левый верхний угол строки. Возвращает ширину.
@@ -399,20 +485,21 @@ impl Font {
         let base = (y + self.ascent(px)).round();
         let mut pen = x;
         let k = Self::key(px);
-        let mut cache = self.cache.borrow_mut();
         for ch in text.chars() {
             if ch == ' ' {
                 pen += self.advance(' ', px);
                 continue;
             }
-            let g = cache.entry((ch, k)).or_insert_with(|| self.rasterize(ch, px));
+            let f = self.pick(ch);
+            let mut cache = f.cache.borrow_mut();
+            if cache.len() > 4096 {
+                cache.clear();
+            }
+            let g = cache.entry((ch, k)).or_insert_with(|| f.rasterize(ch, px));
             if g.w > 0 {
                 fb.blit_mask(pen.round() as i32 + g.xoff, base as i32 + g.yoff, g.w, g.h, &g.alpha, color);
             }
             pen += g.advance;
-        }
-        if cache.len() > 4096 {
-            cache.clear();
         }
         pen - x
     }
@@ -438,6 +525,43 @@ impl Font {
     }
 }
 
+/// Возможные пути к ISOCPEUR.ttf: дополнительные папки и системные папки шрифтов.
+fn isocpeur_candidates(extra_dirs: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let mut dirs: Vec<PathBuf> = extra_dirs.to_vec();
+    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
+    if cfg!(target_os = "windows") {
+        dirs.push(env("WINDIR").unwrap_or_else(|| PathBuf::from("C:\\Windows")).join("Fonts"));
+        if let Some(l) = env("LOCALAPPDATA") {
+            dirs.push(l.join("Microsoft").join("Windows").join("Fonts"));
+        }
+    } else if cfg!(target_os = "macos") {
+        if let Some(h) = env("HOME") {
+            dirs.push(h.join("Library/Fonts"));
+        }
+        dirs.push(PathBuf::from("/Library/Fonts"));
+        dirs.push(PathBuf::from("/System/Library/Fonts/Supplemental"));
+    } else {
+        if let Some(h) = env("HOME") {
+            dirs.push(h.join(".local/share/fonts"));
+            dirs.push(h.join(".fonts"));
+        }
+        dirs.push(PathBuf::from("/usr/share/fonts/truetype"));
+        dirs.push(PathBuf::from("/usr/share/fonts/TTF"));
+        dirs.push(PathBuf::from("/usr/local/share/fonts"));
+    }
+    let mut out = Vec::new();
+    for d in dirs {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy().eq_ignore_ascii_case("isocpeur.ttf") {
+                out.push(e.path());
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,5 +581,29 @@ mod tests {
         // Составной глиф (Й = И + бреве).
         let y = f.rasterize('Й', 20.0);
         assert!(y.h > f.rasterize('И', 20.0).h);
+    }
+
+    #[test]
+    fn engineering_font_matches_standard_metrics() {
+        let std_f = Font::builtin();
+        let eng = Font::load_external(ENGINEERING_FONT_DATA).unwrap();
+        // Полный русский алфавит в самом шрифте, без запасного.
+        assert!("АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя".chars().all(|c| eng.cmap.contains_key(&(c as u32))));
+        // Ё/ё/Э/э — настоящие буквы, а не залитые прямоугольники-заглушки.
+        for c in ['Ё', 'ё', 'Э', 'э'] {
+            let g = eng.rasterize(c, 40.0);
+            let filled = g.alpha.iter().filter(|&&a| a > 128).count() as f32 / (g.w * g.h) as f32;
+            assert!(filled < 0.45, "{c}: {filled}");
+        }
+        // Высота прописных совпадает со стандартным шрифтом.
+        let h_std = std_f.rasterize('H', 40.0).h as i32;
+        let h_eng = eng.rasterize('H', 40.0).h as i32;
+        assert!((h_std - h_eng).abs() <= 2, "{h_std} vs {h_eng}");
+        assert!((std_f.line_height(14.0) - eng.line_height(14.0)).abs() < 0.01);
+        // Недостающий символ рисуется запасным шрифтом.
+        assert!(!eng.cmap.contains_key(&('✓' as u32)));
+        assert!(eng.advance('✓', 14.0) > 0.0);
+        let mut fb = Framebuffer::new(80, 30);
+        assert!(eng.draw(&mut fb, 2.0, 2.0, "Ab ✓", 16.0, 0xFF00_0000) > 20.0);
     }
 }
